@@ -42,7 +42,7 @@ nav.tabs{
 }
 .tab-btn.active{color:var(--text);border-bottom-color:var(--accent);font-weight:600;}
 
-main{padding:20px;max-width:1200px;margin:0 auto;}
+main{padding:20px;max-width:1600px;margin:0 auto;}
 .tab-panel{display:none;}
 .tab-panel.active{display:block;}
 
@@ -137,11 +137,69 @@ tbody tr:hover{background:var(--bg);}
 #tableRepo .movPairInput{width:52px;padding:4px 6px;text-align:right;}
 #tableRepo th.movCol{white-space:nowrap;}
 .colFilterBtn{
-  border:none;background:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0 0 3px;vertical-align:middle;
+  display:block;margin-top:3px;border:1px solid var(--border);background:var(--panel);border-radius:5px;
+  color:var(--muted);cursor:pointer;font-size:11px;padding:2px 6px;
 }
-.colFilterBtn:hover{color:var(--text);}
-.colFilterBtn.active{color:var(--accent);font-weight:700;}
+.colFilterBtn:hover{background:var(--bg);color:var(--text);}
+.colFilterBtn.active{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700;}
 th.colFilterActive{background:#dbeafe;color:var(--text);}
+
+/* Cabeceras clicables para ordenar la tabla de traspasos por esa columna */
+.sortLabel{cursor:pointer;}
+.sortLabel:hover{text-decoration:underline;color:var(--text);}
+.sortLabel.active{color:var(--accent);font-weight:700;}
+
+/* La cantidad a traspasar supera el stock disponible en la tienda de
+   origen: aviso de dato a revisar, con prioridad sobre el resaltado de
+   "múltiples traspasos" en la misma fila. */
+.movPairInput.qty-exceeds-stock{background:var(--danger-bg);border-color:var(--danger);color:var(--danger);font-weight:700;}
+
+/* Resalta la cantidad cuando esa misma referencia tiene más de un traspaso a
+   la vez, para que no pase desapercibido al revisar la fila. */
+.movPairInput.multi-mov{background:var(--warn-bg);border-color:var(--warn);color:var(--warn);font-weight:700;}
+
+/* Barra de atajos de filtrado sobre la tabla de traspasos */
+.repo-filter-toolbar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:10px;}
+.repo-filter-toolbar .checkbox-label{margin-bottom:0;}
+.store-chip-group{display:flex;gap:6px;}
+.chip-btn{
+  border:1px solid var(--border);background:var(--panel);border-radius:20px;padding:6px 14px;
+  font-size:12.5px;font-weight:600;cursor:pointer;color:var(--text);
+}
+.chip-btn:hover{background:var(--bg);}
+.chip-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+
+/* La tabla tiene muchas columnas (Top20, stock/ventas, 12 traspasos): que
+   crezca a su ancho natural para que no comprima las columnas fijas de
+   abajo y para que el scroll horizontal funcione con anchos predecibles. */
+#tableRepo{width:auto;min-width:100%;}
+
+/* La caja de scroll de esta tabla tiene alto acotado (fijado por JS según
+   el hueco real hasta el borde de la ventana — ver adjustRepoTableScrollHeight
+   en app.js): así su barra de desplazamiento horizontal (y la vertical, si
+   hay muchas filas) quedan siempre a la vista cerca de la cabecera, sin
+   tener que bajar toda la página para llegar a ellas. La cabecera
+   (position:sticky;top:0) queda fija arriba de ESTA caja al desplazar filas.
+   El max-height de aquí es solo el valor de respaldo antes de que JS calcule
+   el real. */
+#tab-traspasos .table-scroll{max-height:65vh;overflow-y:auto;}
+
+/* Congela Producto y SKU al desplazar la tabla en horizontal (hay muchas
+   columnas de stock/ventas/traspaso a la derecha). */
+#tableRepo td:nth-child(1), #tableRepo th:nth-child(1){
+  position:sticky;left:0;z-index:2;background:var(--panel);
+  width:180px;min-width:180px;max-width:180px;overflow:hidden;text-overflow:ellipsis;
+}
+#tableRepo td:nth-child(2), #tableRepo th:nth-child(2){
+  position:sticky;left:180px;z-index:2;background:var(--panel);
+  width:100px;min-width:100px;max-width:100px;overflow:hidden;text-overflow:ellipsis;
+  box-shadow:2px 0 4px -2px rgba(0,0,0,.2);
+}
+#tableRepo thead th:nth-child(1), #tableRepo thead th:nth-child(2){ z-index:4; }
+#tableRepo tbody tr:hover td:nth-child(1), #tableRepo tbody tr:hover td:nth-child(2){ background:var(--bg); }
+
+/* Oculta las 4 columnas Top20 (checkbox "Ocultar columnas Top20") */
+#tableRepo.hide-top20 .top20-col{ display:none; }
 
 .toast{
   position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);
