@@ -260,6 +260,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.add('active');
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
     localStorage.setItem(TAB_STORAGE_KEY, btn.dataset.tab);
+    if (btn.dataset.tab === 'traspasos') adjustRepoTableScrollHeight();
   });
 });
 
@@ -1589,6 +1590,25 @@ function renderRepoStoreChips() {
   });
 }
 
+// Acota el alto de la caja de scroll de la tabla de traspasos al hueco real
+// que queda hasta el borde de la ventana, para que su barra de scroll
+// (horizontal y vertical) quede siempre visible cerca de la cabecera en vez
+// de quedar empujada al final de una tabla que puede tener muchas filas.
+// Solo actúa si la pestaña está visible; se recalcula al cambiar de pestaña,
+// al redimensionar la ventana y cada vez que se vuelve a pintar la tabla
+// (el contenido de encima puede cambiar de alto, p. ej. al mostrar el aviso
+// de filtros activos).
+function adjustRepoTableScrollHeight() {
+  const panel = document.getElementById('tab-traspasos');
+  if (!panel || !panel.classList.contains('active')) return;
+  const box = panel.querySelector('.table-scroll');
+  if (!box) return;
+  const top = box.getBoundingClientRect().top;
+  const available = window.innerHeight - top - 16;
+  box.style.maxHeight = Math.max(240, Math.round(available)) + 'px';
+}
+window.addEventListener('resize', adjustRepoTableScrollHeight);
+
 // Reconstruir la tabla (thead+tbody) dentro del propio handler "change" de un
 // <input> puede hacer que el navegador dispare otro "change" reentrante para
 // ese mismo input al retirarlo del DOM todavía enfocado (efecto secundario
@@ -1707,6 +1727,7 @@ function renderRepoTableInner() {
   renderRepoStoreChips();
   renderRepoFilterInfo();
   renderRepoSummary();
+  adjustRepoTableScrollHeight();
 }
 
 function renderRepoFilterInfo() {
