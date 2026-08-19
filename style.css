@@ -137,11 +137,49 @@ tbody tr:hover{background:var(--bg);}
 #tableRepo .movPairInput{width:52px;padding:4px 6px;text-align:right;}
 #tableRepo th.movCol{white-space:nowrap;}
 .colFilterBtn{
-  border:none;background:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0 0 3px;vertical-align:middle;
+  display:block;margin-top:3px;border:1px solid var(--border);background:var(--panel);border-radius:5px;
+  color:var(--muted);cursor:pointer;font-size:11px;padding:2px 6px;
 }
-.colFilterBtn:hover{color:var(--text);}
-.colFilterBtn.active{color:var(--accent);font-weight:700;}
+.colFilterBtn:hover{background:var(--bg);color:var(--text);}
+.colFilterBtn.active{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700;}
 th.colFilterActive{background:#dbeafe;color:var(--text);}
+
+/* Resalta la cantidad cuando esa misma referencia tiene más de un traspaso a
+   la vez, para que no pase desapercibido al revisar la fila. */
+.movPairInput.multi-mov{background:var(--warn-bg);border-color:var(--warn);color:var(--warn);font-weight:700;}
+
+/* Barra de atajos de filtrado sobre la tabla de traspasos */
+.repo-filter-toolbar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:10px;}
+.repo-filter-toolbar .checkbox-label{margin-bottom:0;}
+.store-chip-group{display:flex;gap:6px;}
+.chip-btn{
+  border:1px solid var(--border);background:var(--panel);border-radius:20px;padding:6px 14px;
+  font-size:12.5px;font-weight:600;cursor:pointer;color:var(--text);
+}
+.chip-btn:hover{background:var(--bg);}
+.chip-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+
+/* La tabla tiene muchas columnas (Top20, stock/ventas, 12 traspasos): que
+   crezca a su ancho natural para que no comprima las columnas fijas de
+   abajo y para que el scroll horizontal funcione con anchos predecibles. */
+#tableRepo{width:auto;min-width:100%;}
+
+/* Congela Producto y SKU al desplazar la tabla en horizontal (hay muchas
+   columnas de stock/ventas/traspaso a la derecha). */
+#tableRepo td:nth-child(1), #tableRepo th:nth-child(1){
+  position:sticky;left:0;z-index:2;background:var(--panel);
+  width:180px;min-width:180px;max-width:180px;overflow:hidden;text-overflow:ellipsis;
+}
+#tableRepo td:nth-child(2), #tableRepo th:nth-child(2){
+  position:sticky;left:180px;z-index:2;background:var(--panel);
+  width:100px;min-width:100px;max-width:100px;overflow:hidden;text-overflow:ellipsis;
+  box-shadow:2px 0 4px -2px rgba(0,0,0,.2);
+}
+#tableRepo thead th:nth-child(1), #tableRepo thead th:nth-child(2){ z-index:4; }
+#tableRepo tbody tr:hover td:nth-child(1), #tableRepo tbody tr:hover td:nth-child(2){ background:var(--bg); }
+
+/* Oculta las 4 columnas Top20 (checkbox "Ocultar columnas Top20") */
+#tableRepo.hide-top20 .top20-col{ display:none; }
 
 .toast{
   position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);

@@ -195,7 +195,13 @@
         <h3>Traspasos por SKU</h3>
         <input type="search" id="repoFilter" placeholder="Filtrar por SKU o nombre...">
       </div>
-      <p class="hint">Las columnas Top20 muestran si la referencia está entre las 20 más vendidas del último mes en esa tienda (excluyendo gift cards, envoltorios/regalo y accesorios — configurable en "Reglas / Config"). Cada columna de traspaso es editable directamente; pulsa el embudo ▾ de su cabecera para ver solo las filas con movimiento en esa columna.</p>
+      <p class="hint">Las columnas Top20 muestran si la referencia está entre las 20 más vendidas del último mes en esa tienda (excluyendo gift cards, envoltorios/regalo y accesorios — configurable en "Reglas / Config"). Cada columna de traspaso es editable directamente; pulsa "▾ filtrar" en su cabecera para ver solo las filas con movimiento en esa columna, o usa los atajos de aquí abajo. Las cantidades se resaltan cuando esa misma referencia tiene más de un traspaso a la vez. Producto y SKU quedan fijos al desplazar la tabla en horizontal.</p>
+      <div class="repo-filter-toolbar">
+        <label class="checkbox-label"><input type="checkbox" id="repoOnlyWithMov"> Mostrar solo filas con algún traspaso</label>
+        <label class="checkbox-label"><input type="checkbox" id="repoHideTop20"> Ocultar columnas Top20</label>
+        <span class="muted">Traspasos de/hacia:</span>
+        <div class="store-chip-group" id="repoStoreChips"></div>
+      </div>
       <div id="repoColFilterInfo" class="inline-fields"></div>
       <div class="table-scroll"><table id="tableRepo"><thead><tr></tr></thead><tbody></tbody></table></div>
     </div>
