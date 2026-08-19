@@ -172,7 +172,7 @@
   <!-- TAB REPO SEMANAL -->
   <section id="tab-repo" class="tab-panel">
     <h2>Repo semanal entre tiendas</h2>
-    <p class="hint">Carga aquí el CSV del report con el stock y las ventas de los últimos 3 meses de cada tienda (Amigó, Madrid, Rambla, Valencia). Las referencias Wholesale (SKU "WH-..." o nombre "(WH)...") se omiten automáticamente. Si el report trae también una columna de ventas online, mapéala aparte: se suma a las de Amigó para reflejar la venta real que sale de ese almacén. Por cada SKU, la app calcula el stock que "le correspondería" a cada tienda repartiendo el stock total según el peso de ventas de cada una, y sugiere traspasos desde las tiendas con sobrante hacia las que tienen falta.</p>
+    <p class="hint">Carga aquí el CSV del report con el stock y las ventas del último mes de cada tienda (Amigó, Madrid, Rambla, Valencia). Las referencias Wholesale (SKU "WH-..." o nombre "(WH)...") se omiten automáticamente. Si el report trae también una columna de ventas online del último mes, mapéala aparte: se suma a las de Amigó para reflejar la venta real que sale de ese almacén. Por cada SKU, la app calcula el stock que "le correspondería" a cada tienda repartiendo el stock total según el peso de ventas de cada una, y sugiere traspasos desde las tiendas con sobrante hacia las que tienen falta.</p>
     <div class="card">
       <label class="btn-primary file-label">Elegir CSV del report
         <input type="file" id="inputRepoReport" accept=".csv" hidden>
@@ -195,7 +195,7 @@
         <h3>Traspasos por SKU</h3>
         <input type="search" id="repoFilter" placeholder="Filtrar por SKU o nombre...">
       </div>
-      <p class="hint">Las columnas Top20 muestran si la referencia está entre las 20 más vendidas de los últimos 3 meses en esa tienda (excluyendo gift cards, envoltorios/regalo y accesorios — configurable en "Reglas / Config"). Cada columna de traspaso es editable directamente; pulsa el embudo ▾ de su cabecera para ver solo las filas con movimiento en esa columna.</p>
+      <p class="hint">Las columnas Top20 muestran si la referencia está entre las 20 más vendidas del último mes en esa tienda (excluyendo gift cards, envoltorios/regalo y accesorios — configurable en "Reglas / Config"). Cada columna de traspaso es editable directamente; pulsa el embudo ▾ de su cabecera para ver solo las filas con movimiento en esa columna.</p>
       <div id="repoColFilterInfo" class="inline-fields"></div>
       <div class="table-scroll"><table id="tableRepo"><thead><tr></tr></thead><tbody></tbody></table></div>
     </div>

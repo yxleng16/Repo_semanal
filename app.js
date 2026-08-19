@@ -1355,9 +1355,9 @@ function isRealProductForTop20(row) {
   return true;
 }
 
-// Marca, por tienda, las 20 referencias con más ventas en los últimos 3
-// meses (de entre los productos reales) — se recalcula tras importar o
-// pulsar "Calcular sugerencias de traspaso".
+// Marca, por tienda, las 20 referencias con más ventas en el último mes
+// (de entre los productos reales) — se recalcula tras importar o pulsar
+// "Calcular sugerencias de traspaso".
 function computeTop20() {
   STORES.forEach(s => {
     const eligible = state.repoSemanal.rows.filter(r => isRealProductForTop20(r) && (r.sales[s] || 0) > 0);
@@ -1382,9 +1382,9 @@ document.getElementById('inputRepoReport').addEventListener('change', async (e) 
   ];
   STORES.forEach(s => {
     fields.push({ key: 'stock_' + s, label: `Stock ${STORE_LABELS[s]}`, required: false, guess: storeGuessRegex(s, 'stock') });
-    fields.push({ key: 'sales_' + s, label: `Ventas 3m ${STORE_LABELS[s]}`, required: false, guess: storeGuessRegex(s, 'sales') });
+    fields.push({ key: 'sales_' + s, label: `Ventas 1m ${STORE_LABELS[s]}`, required: false, guess: storeGuessRegex(s, 'sales') });
   });
-  fields.push({ key: 'sales_ONLINE', label: 'Ventas 3m Online (se suma a Amigó)', required: false, guess: 'online' });
+  fields.push({ key: 'sales_ONLINE', label: 'Ventas 1m Online (se suma a Amigó)', required: false, guess: 'online' });
   renderMapping(container, headers, fields, (mapping) => {
     const bySku = {};
     const fresh = [];
@@ -1505,7 +1505,7 @@ function setMovQtyForPair(row, from, to, qty) {
 // combinan con OR, como pedía revisar cada traspaso por separado).
 function repoTableHeadHtml() {
   const top20Th = STORES.map(s => `<th>Top20 ${STORE_ABBR[s]}</th>`).join('');
-  const stockSalesTh = STORES.map(s => `<th>Ventas 3m ${STORE_ABBR[s]}</th><th>Stock ${STORE_ABBR[s]}</th>`).join('');
+  const stockSalesTh = STORES.map(s => `<th>Ventas 1m ${STORE_ABBR[s]}</th><th>Stock ${STORE_ABBR[s]}</th>`).join('');
   const activeFilters = state.repoSemanal.colFilters || [];
   const movTh = MOVEMENT_ORDER.map(([f, t]) => {
     const key = f + '>' + t;
