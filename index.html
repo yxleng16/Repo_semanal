@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NUNU · Gestor de traspasos Wholesale</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>NUNU <span>Gestor de traspasos Wholesale</span></h1>
+  <div class="topbar-actions">
+    <span id="lastSaved" class="muted"></span>
+    <button id="btnExportBackup" class="btn-ghost">Exportar backup</button>
+    <label class="btn-ghost file-label">Importar backup
+      <input type="file" id="inputImportBackup" accept=".json" hidden>
+    </label>
+    <button id="btnResetAll" class="btn-danger-ghost">Reiniciar todo</button>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab-btn active" data-tab="catalogo">1. Catálogo</button>
+  <button class="tab-btn" data-tab="stock">2. Stock &amp; Ventas</button>
+  <button class="tab-btn" data-tab="pedidos">Pedidos guardados</button>
+  <button class="tab-btn" data-tab="pedido">3. Pedido Wholesale</button>
+  <button class="tab-btn" data-tab="dashboard">4. Dashboard traspasos</button>
+  <button class="tab-btn" data-tab="abastecidas">5. Abastecidas</button>
+  <button class="tab-btn" data-tab="repo">Repo semanal</button>
+  <button class="tab-btn" data-tab="factura">Factura</button>
+  <button class="tab-btn" data-tab="config">Reglas / Config</button>
+</nav>
+
+<main>
+
+  <!-- TAB 1: CATALOGO -->
+  <section id="tab-catalogo" class="tab-panel active">
+    <h2>Catálogo maestro</h2>
+    <p class="hint">Solo necesita el SKU Wholesale tal cual (p. ej. "WH-BRI517-L-ORO") y el nombre del producto — la app interpreta sola la base, la talla y el material a partir del propio código, sea cual sea el orden en que aparezcan. Si el mismo archivo trae también el stock actual (columna "Available" o similar), mapéala aquí y no hará falta importarla aparte en Stock Wholesale.</p>
+    <div class="card">
+      <label class="btn-primary file-label">Elegir CSV de catálogo
+        <input type="file" id="inputCatalog" accept=".csv" hidden>
+      </label>
+      <div id="mappingCatalog" class="mapping-box"></div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <h3>Referencias cargadas (<span id="catalogCount">0</span>)</h3>
+        <input type="search" id="catalogFilter" placeholder="Filtrar por SKU o nombre...">
+      </div>
+      <div class="table-scroll"><table id="tableCatalog"><thead><tr>
+        <th>Base</th><th>Nombre</th><th>Talla</th><th>Material</th><th>SKU Wholesale</th><th>Variante (texto original)</th><th>Precio</th>
+      </tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- TAB 2: STOCK & VENTAS -->
+  <section id="tab-stock" class="tab-panel">
+    <h2>Stock Wholesale</h2>
+    <div class="card">
+      <label class="btn-primary file-label">Elegir CSV de stock Wholesale
+        <input type="file" id="inputStockWholesale" accept=".csv" hidden>
+      </label>
+      <div id="mappingStockWholesale" class="mapping-box"></div>
+      <p class="muted">Referencias en stock: <span id="stockWholesaleCount">0</span></p>
+    </div>
+
+    <h2>Stock y ventas por tienda</h2>
+    <div class="card">
+      <p class="hint">Si el stock y las ventas de una tienda vienen en el mismo archivo (el típico export con columnas "Available", "Sales", etc.), impórtalo una sola vez y mapea las columnas que tengas. La columna de ventas de 30 días suele llamarse "Sales" o "Ventas 1m" según el export — no la confundas con "Qty Sold 3m"/"Qty Sold 12m", que son otras ventanas. Si no mapeas Fecha, la app suma tal cual lo que traiga esa columna (asume que ya es el periodo de <span id="salesWindowLabel1">30</span> días). Volver a importar reemplaza por completo los datos anteriores de esa tienda (no se acumulan).</p>
+      <div class="inline-fields">
+        <select id="selectStoreForStock">
+          <option value="AMIGO">Amigó (almacén central)</option>
+          <option value="MADRID">Madrid</option>
+          <option value="RAMBLA">Rambla</option>
+          <option value="VALENCIA">Valencia</option>
+        </select>
+        <label class="btn-primary file-label">Elegir CSV de tienda
+          <input type="file" id="inputStoreStock" accept=".csv" hidden>
+        </label>
+      </div>
+      <div id="mappingStoreStock" class="mapping-box"></div>
+      <h3 style="margin-top:14px">Stock actual</h3>
+      <div class="store-summary" id="storeStockSummary"></div>
+      <h3 style="margin-top:14px">Ventas en ventana</h3>
+      <div class="store-summary" id="storeSalesSummary"></div>
+    </div>
+  </section>
+
+  <!-- TAB: PEDIDOS GUARDADOS -->
+  <section id="tab-pedidos" class="tab-panel">
+    <h2>Pedidos guardados</h2>
+    <p class="hint">Cada pedido Wholesale que gestiones (por cliente, por fecha, como prefieras) se guarda por separado con su propio traspaso calculado. Ábrelo para seguir trabajando en él en las pestañas 3-5; los cambios se guardan solos.</p>
+    <div class="card">
+      <div class="table-scroll"><table id="tablePedidos"><thead><tr>
+        <th>Título</th><th>Cliente</th><th>Líneas</th><th>Pendientes de aprobar</th><th>Última actualización</th><th></th>
+      </tr></thead><tbody></tbody></table></div>
+      <p class="muted" id="pedidosEmpty">Todavía no has guardado ningún pedido. Ve a "3. Pedido Wholesale" para empezar uno y guardarlo con un título.</p>
+    </div>
+  </section>
+
+  <!-- TAB 3: PEDIDO -->
+  <section id="tab-pedido" class="tab-panel">
+    <div class="card" id="activePedidoBanner"></div>
+
+    <h2>Buscador de piezas</h2>
+    <div class="card">
+      <div class="inline-fields">
+        <input type="text" id="searchQuery" placeholder='Ej: "anillo oval links talla 17"'>
+        <button id="btnSearch" class="btn-primary">Buscar</button>
+      </div>
+      <div id="searchResults" class="search-results"></div>
+    </div>
+
+    <h2>Importar pedido por CSV</h2>
+    <div class="card">
+      <p class="hint">Se combina (suma cantidades) con lo que añadas manualmente desde el buscador.</p>
+      <label class="btn-primary file-label">Elegir CSV de pedido
+        <input type="file" id="inputPedido" accept=".csv" hidden>
+      </label>
+      <div id="mappingPedido" class="mapping-box"></div>
+    </div>
+
+    <h2>Pedido actual</h2>
+    <div class="card">
+      <div class="table-scroll"><table id="tablePedido"><thead><tr>
+        <th>SKU Wholesale</th><th>Nombre</th><th>Cantidad pedida</th><th>Precio unit.</th><th>Importe</th><th></th>
+      </tr></thead><tbody></tbody></table></div>
+      <p class="muted" id="pedidoEmpty">No hay piezas en el pedido todavía.</p>
+    </div>
+  </section>
+
+  <!-- TAB 4: DASHBOARD -->
+  <section id="tab-dashboard" class="tab-panel">
+    <h2>Dashboard de traspasos</h2>
+    <div class="card">
+      <button id="btnCalcular" class="btn-primary">Calcular sugerencias de traspaso</button>
+      <span class="muted" id="calcInfo"></span>
+    </div>
+    <div class="card">
+      <div class="table-scroll"><table id="tableDashboard"><thead><tr>
+        <th>SKU Wholesale</th><th>Nombre</th><th>Pedido</th><th>Stock WH</th><th>Déficit</th>
+        <th>Interpretado como</th><th>Ventas 30d (total)</th><th>Estado</th><th>Asignación por tienda</th><th>Aprobar</th><th>Detalle</th>
+      </tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="card">
+      <h3>Resumen</h3>
+      <div id="dashboardSummary"></div>
+    </div>
+    <div class="card">
+      <button id="btnGenerarCSVs" class="btn-primary">Generar CSVs de retirada por tienda</button>
+      <div id="downloadLinks" class="download-links"></div>
+    </div>
+  </section>
+
+  <!-- TAB 5: ABASTECIDAS -->
+  <section id="tab-abastecidas" class="tab-panel">
+    <h2>Piezas abastecidas</h2>
+    <p class="hint">Piezas ya cubiertas (total o parcialmente) tras aprobar el traspaso. Genera aquí el CSV de alta de stock en Wholesale.</p>
+    <div class="card">
+      <div class="table-scroll"><table id="tableAbastecidas"><thead><tr>
+        <th>SKU Wholesale</th><th>Nombre</th><th>Cantidad abastecida</th><th>Pendiente</th>
+      </tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="card">
+      <button id="btnGenerarAlta" class="btn-primary">Generar CSV de alta en Wholesale</button>
+      <div id="downloadAltaLinks" class="download-links"></div>
+    </div>
+  </section>
+
+  <!-- TAB REPO SEMANAL -->
+  <section id="tab-repo" class="tab-panel">
+    <h2>Repo semanal entre tiendas</h2>
+    <p class="hint">Carga aquí el CSV del report con el stock y las ventas del último mes de cada tienda (Amigó, Madrid, Rambla, Valencia). Por cada SKU, la app calcula el stock que "le correspondería" a cada tienda repartiendo el stock total según el peso de ventas de cada una, y sugiere traspasos desde las tiendas con sobrante hacia las que tienen falta. Revisa el resultado y edita, quita o añade a mano cualquier traspaso antes de descargar los CSV.</p>
+    <div class="card">
+      <label class="btn-primary file-label">Elegir CSV del report
+        <input type="file" id="inputRepoReport" accept=".csv" hidden>
+      </label>
+      <div id="mappingRepo" class="mapping-box"></div>
+      <p class="muted">SKUs importados: <span id="repoImportCount">0</span></p>
+    </div>
+    <div class="card">
+      <button id="btnCalcularRepo" class="btn-primary">Calcular sugerencias de traspaso</button>
+      <span class="muted" id="repoCalcInfo"></span>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <h3>Traspasos por SKU</h3>
+        <input type="search" id="repoFilter" placeholder="Filtrar por SKU o nombre...">
+      </div>
+      <div class="table-scroll"><table id="tableRepo"><thead><tr>
+        <th>Producto</th><th>SKU</th>
+        <th>Stock AMI</th><th>Stock MAD</th><th>Stock RAM</th><th>Stock VLC</th>
+        <th>Ventas 1m AMI</th><th>Ventas 1m MAD</th><th>Ventas 1m RAM</th><th>Ventas 1m VLC</th>
+        <th>Traspasos</th>
+      </tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="card">
+      <h3>Resumen</h3>
+      <div id="repoSummary"></div>
+    </div>
+    <div class="card">
+      <button id="btnGenerarCSVsRepo" class="btn-primary">Generar CSVs de traspaso (AMI/MAD/RAM/VLC)</button>
+      <div id="downloadLinksRepo" class="download-links"></div>
+    </div>
+  </section>
+
+  <!-- TAB FACTURA -->
+  <section id="tab-factura" class="tab-panel">
+    <h2>Factura del pedido</h2>
+    <p class="hint">Se genera a partir de las líneas y precios de "3. Pedido Wholesale". Marca el cliente como internacional para eximir el IVA (exportación / operación intracomunitaria); a los clientes nacionales se les aplica el IVA configurado en Reglas/Config.</p>
+    <div id="facturaContent"></div>
+  </section>
+
+  <!-- CONFIG -->
+  <section id="tab-config" class="tab-panel">
+    <h2>Reglas de conversión SKU</h2>
+    <div class="card">
+      <p class="hint">La app parte cualquier código por guiones: el primer trozo es la base, y de los trozos siguientes identifica cuál es el material (comparándolo contra las listas de abajo) — el que quede es la talla. No importa el orden ("BASE-L-ORO" o "BASE-ORO-L" se interpretan igual). Si ningún trozo coincide con una palabra de material, se asume el material por defecto.</p>
+      <label>Prefijo Wholesale
+        <input type="text" id="cfgPrefix" value="WH-">
+      </label>
+      <label>Palabras que identifican ORO (separadas por coma, se comparan trozo a trozo)
+        <input type="text" id="cfgAliasOro" value="ORO,OR,GOLD">
+      </label>
+      <label>Palabras que identifican RODIO (separadas por coma, se comparan trozo a trozo)
+        <input type="text" id="cfgAliasRodio" value="RODIO,RO,RH">
+      </label>
+      <label>Material por defecto cuando no se distingue
+        <select id="cfgMaterialDefault">
+          <option value="ORO" selected>Oro</option>
+          <option value="RODIO">Rodio</option>
+        </select>
+      </label>
+      <button id="btnSaveRules" class="btn-primary">Guardar reglas</button>
+    </div>
+
+    <h2>Criterios de traspaso</h2>
+    <div class="card">
+      <label>Ventana de ventas (días)
+        <input type="number" id="cfgSalesWindow" value="30" min="1">
+      </label>
+      <label>Umbral de ventas para requerir aprobación (uds, suma entre tiendas)
+        <input type="number" id="cfgSalesThreshold" value="15" min="0">
+      </label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="cfgWarnLastUnit" checked>
+        Marcar como "requiere aprobación" cualquier retirada que deje una tienda a 0 unidades
+      </label>
+      <label>Prioridad de tiendas
+        <select id="cfgSecondaryCriterion">
+          <option value="ventas_asc" selected>Amigó primero, luego menor venta reciente</option>
+          <option value="stock_desc">Amigó primero, luego mayor stock sobrante</option>
+        </select>
+      </label>
+      <button id="btnSaveConfig" class="btn-primary">Guardar criterios</button>
+    </div>
+
+    <h2>Datos de facturación</h2>
+    <div class="card">
+      <p class="hint">Se usan para rellenar la cabecera de la factura (pestaña "Factura"). El IVA aquí indicado solo se aplica a clientes nacionales; a los internacionales la factura sale exenta de IVA.</p>
+      <label>Nombre / razón social
+        <input type="text" id="cfgEmpresaNombre" placeholder="NUNU">
+      </label>
+      <label>NIF / CIF
+        <input type="text" id="cfgEmpresaNif">
+      </label>
+      <label>Dirección fiscal
+        <input type="text" id="cfgEmpresaDireccion">
+      </label>
+      <label>IVA para clientes nacionales (%)
+        <input type="number" id="cfgIvaPorcentaje" value="21" min="0" step="0.1">
+      </label>
+      <button id="btnSaveFacturaConfig" class="btn-primary">Guardar datos de facturación</button>
+    </div>
+  </section>
+
+</main>
+
+<div id="toast" class="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
