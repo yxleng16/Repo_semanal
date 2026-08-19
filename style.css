@@ -42,7 +42,7 @@ nav.tabs{
 }
 .tab-btn.active{color:var(--text);border-bottom-color:var(--accent);font-weight:600;}
 
-main{padding:20px;max-width:1200px;margin:0 auto;}
+main{padding:20px;max-width:1600px;margin:0 auto;}
 .tab-panel{display:none;}
 .tab-panel.active{display:block;}
 
@@ -173,6 +173,16 @@ th.colFilterActive{background:#dbeafe;color:var(--text);}
    crezca a su ancho natural para que no comprima las columnas fijas de
    abajo y para que el scroll horizontal funcione con anchos predecibles. */
 #tableRepo{width:auto;min-width:100%;}
+
+/* La caja de scroll de esta tabla tiene alto acotado (fijado por JS según
+   el hueco real hasta el borde de la ventana — ver adjustRepoTableScrollHeight
+   en app.js): así su barra de desplazamiento horizontal (y la vertical, si
+   hay muchas filas) quedan siempre a la vista cerca de la cabecera, sin
+   tener que bajar toda la página para llegar a ellas. La cabecera
+   (position:sticky;top:0) queda fija arriba de ESTA caja al desplazar filas.
+   El max-height de aquí es solo el valor de respaldo antes de que JS calcule
+   el real. */
+#tab-traspasos .table-scroll{max-height:65vh;overflow-y:auto;}
 
 /* Congela Producto y SKU al desplazar la tabla en horizontal (hay muchas
    columnas de stock/ventas/traspaso a la derecha). */
