@@ -29,7 +29,7 @@ function defaultState() {
     dashboard: [],           // resultado calculado del pedido actualmente abierto
     pedidos: [],             // pedidos guardados: {id, titulo, cliente, creadoEn, actualizadoEn, pedido, dashboard}
     pedidoActualId: null,    // id del pedido abierto en state.pedido/state.dashboard, o null si es un borrador sin guardar
-    repoSemanal: { rows: [], colFilters: [] }, // rows: [{sku, nombre, stock:{AMIGO..}, sales:{AMIGO..}, movimientos:[{from,to,qty}], top20:{AMIGO..}}]
+    repoSemanal: { rows: [], colFilters: [], onlyWithMovement: false, hideTop20: false }, // rows: [{sku, nombre, stock:{AMIGO..}, sales:{AMIGO..}, movimientos:[{from,to,qty}], top20:{AMIGO..}}]
   };
 }
 
@@ -58,6 +58,8 @@ function mergeIntoDefault(parsed) {
   merged.repoSemanal = Object.assign({}, def.repoSemanal, parsed && parsed.repoSemanal);
   if (!Array.isArray(merged.repoSemanal.rows)) merged.repoSemanal.rows = [];
   if (!Array.isArray(merged.repoSemanal.colFilters)) merged.repoSemanal.colFilters = [];
+  if (typeof merged.repoSemanal.onlyWithMovement !== 'boolean') merged.repoSemanal.onlyWithMovement = false;
+  if (typeof merged.repoSemanal.hideTop20 !== 'boolean') merged.repoSemanal.hideTop20 = false;
   merged.repoSemanal.rows.forEach(r => {
     if (!r.stock) r.stock = {};
     if (!r.sales) r.sales = {};
@@ -1504,16 +1506,47 @@ function setMovQtyForPair(row, from, to, qty) {
 // el filtro "solo filas con movimiento en esta columna" (varias a la vez se
 // combinan con OR, como pedía revisar cada traspaso por separado).
 function repoTableHeadHtml() {
-  const top20Th = STORES.map(s => `<th>Top20 ${STORE_ABBR[s]}</th>`).join('');
+  const top20Th = STORES.map(s => `<th class="top20-col">Top20 ${STORE_ABBR[s]}</th>`).join('');
   const stockSalesTh = STORES.map(s => `<th>Ventas 1m ${STORE_ABBR[s]}</th><th>Stock ${STORE_ABBR[s]}</th>`).join('');
   const activeFilters = state.repoSemanal.colFilters || [];
   const movTh = MOVEMENT_ORDER.map(([f, t]) => {
     const key = f + '>' + t;
     const active = activeFilters.includes(key);
     return `<th class="movCol${active ? ' colFilterActive' : ''}">${STORE_ABBR[f]}→${STORE_ABBR[t]}
-      <button type="button" class="colFilterBtn${active ? ' active' : ''}" data-pair="${key}" title="Ver solo filas con movimiento en ${STORE_ABBR[f]}→${STORE_ABBR[t]}">▾</button></th>`;
+      <button type="button" class="colFilterBtn${active ? ' active' : ''}" data-pair="${key}" title="Ver solo filas con movimiento en ${STORE_ABBR[f]}→${STORE_ABBR[t]}">▾ filtrar</button></th>`;
   }).join('');
   return `<tr><th>Producto</th><th>SKU</th>${top20Th}${stockSalesTh}${movTh}</tr>`;
+}
+
+// Las 6 columnas de traspaso (3 salidas + 3 entradas) que tocan a una tienda,
+// para el filtro rápido "ver traspasos de esta tienda".
+function storeMovementPairKeys(store) {
+  return MOVEMENT_ORDER.filter(([f, t]) => f === store || t === store).map(([f, t]) => f + '>' + t);
+}
+
+function renderRepoStoreChips() {
+  const el = document.getElementById('repoStoreChips');
+  if (!el) return;
+  const activeFilters = state.repoSemanal.colFilters || [];
+  el.innerHTML = STORES.map(s => {
+    const pairs = storeMovementPairKeys(s);
+    const active = pairs.every(p => activeFilters.includes(p));
+    return `<button type="button" class="chip-btn${active ? ' active' : ''}" data-store="${s}" title="Ver solo filas con algún traspaso de o hacia ${STORE_LABELS[s]}">${STORE_ABBR[s]}</button>`;
+  }).join('');
+  el.querySelectorAll('.chip-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const store = e.currentTarget.dataset.store;
+      const pairs = storeMovementPairKeys(store);
+      const allActive = pairs.every(p => state.repoSemanal.colFilters.includes(p));
+      if (allActive) {
+        state.repoSemanal.colFilters = state.repoSemanal.colFilters.filter(k => !pairs.includes(k));
+      } else {
+        pairs.forEach(p => { if (!state.repoSemanal.colFilters.includes(p)) state.repoSemanal.colFilters.push(p); });
+      }
+      saveState();
+      renderRepoTable();
+    });
+  });
 }
 
 // Reconstruir la tabla (thead+tbody) dentro del propio handler "change" de un
@@ -1535,6 +1568,12 @@ function renderRepoTable() {
 
 function renderRepoTableInner() {
   document.querySelector('#tableRepo thead').innerHTML = repoTableHeadHtml();
+  document.getElementById('tableRepo').classList.toggle('hide-top20', !!state.repoSemanal.hideTop20);
+  const onlyMovEl = document.getElementById('repoOnlyWithMov');
+  if (onlyMovEl) onlyMovEl.checked = !!state.repoSemanal.onlyWithMovement;
+  const hideTop20El = document.getElementById('repoHideTop20');
+  if (hideTop20El) hideTop20El.checked = !!state.repoSemanal.hideTop20;
+
   const tbody = document.querySelector('#tableRepo tbody');
   tbody.innerHTML = '';
   const filterVal = (document.getElementById('repoFilter').value || '').toLowerCase();
@@ -1542,6 +1581,9 @@ function renderRepoTableInner() {
   let rows = state.repoSemanal.rows.filter(r =>
     !filterVal || r.sku.toLowerCase().includes(filterVal) || (r.nombre || '').toLowerCase().includes(filterVal)
   );
+  if (state.repoSemanal.onlyWithMovement) {
+    rows = rows.filter(r => (r.movimientos || []).some(m => m.qty > 0));
+  }
   if (activeFilters.length) {
     rows = rows.filter(r => activeFilters.some(key => {
       const [f, t] = key.split('>');
@@ -1551,11 +1593,16 @@ function renderRepoTableInner() {
 
   sortByNombre(rows, r => r.nombre).forEach(({ item: row }) => {
     const tr = document.createElement('tr');
-    const top20Td = STORES.map(s => `<td class="${row.top20 && row.top20[s] ? 'top20-yes' : 'top20-no'}">${row.top20 && row.top20[s] ? 'SI' : 'NO'}</td>`).join('');
+    const top20Td = STORES.map(s => `<td class="top20-col ${row.top20 && row.top20[s] ? 'top20-yes' : 'top20-no'}">${row.top20 && row.top20[s] ? 'SI' : 'NO'}</td>`).join('');
     const stockSalesTd = STORES.map(s => `<td>${row.sales[s] || 0}</td><td>${row.stock[s] || 0}</td>`).join('');
+    // Si un mismo SKU tiene más de un traspaso a la vez (p. ej. recibe de una
+    // tienda y envía a otra), se resaltan sus cantidades para que no pasen
+    // desapercibidas al revisar la fila.
+    const activeMovCount = (row.movimientos || []).filter(m => m.qty > 0).length;
     const movTd = MOVEMENT_ORDER.map(([f, t]) => {
       const qty = movQtyForPair(row, f, t);
-      return `<td><input type="number" min="0" value="${qty}" class="movPairInput" data-sku="${row.sku}" data-from="${f}" data-to="${t}"></td>`;
+      const highlight = qty > 0 && activeMovCount > 1 ? ' multi-mov' : '';
+      return `<td><input type="number" min="0" value="${qty}" class="movPairInput${highlight}" data-sku="${row.sku}" data-from="${f}" data-to="${t}"></td>`;
     }).join('');
     tr.innerHTML = `<td>${row.nombre}</td><td>${row.sku}</td>${top20Td}${stockSalesTd}${movTd}`;
     tbody.appendChild(tr);
@@ -1582,6 +1629,7 @@ function renderRepoTableInner() {
     });
   });
 
+  renderRepoStoreChips();
   renderRepoFilterInfo();
   renderRepoSummary();
 }
@@ -1601,6 +1649,16 @@ function renderRepoFilterInfo() {
 }
 
 document.getElementById('repoFilter').addEventListener('input', renderRepoTable);
+document.getElementById('repoOnlyWithMov').addEventListener('change', (e) => {
+  state.repoSemanal.onlyWithMovement = e.target.checked;
+  saveState();
+  renderRepoTable();
+});
+document.getElementById('repoHideTop20').addEventListener('change', (e) => {
+  state.repoSemanal.hideTop20 = e.target.checked;
+  saveState();
+  renderRepoTable();
+});
 
 function renderRepoSummary() {
   const el = document.getElementById('repoSummary');
