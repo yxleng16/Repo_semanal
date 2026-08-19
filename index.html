@@ -20,13 +20,14 @@
 </header>
 
 <nav class="tabs">
-  <button class="tab-btn active" data-tab="catalogo">1. Catálogo</button>
-  <button class="tab-btn" data-tab="stock">2. Stock &amp; Ventas</button>
-  <button class="tab-btn" data-tab="pedidos">Pedidos guardados</button>
-  <button class="tab-btn" data-tab="pedido">3. Pedido Wholesale</button>
-  <button class="tab-btn" data-tab="dashboard">4. Dashboard traspasos</button>
-  <button class="tab-btn" data-tab="abastecidas">5. Abastecidas</button>
+  <button class="tab-btn active" data-tab="catalogo">(WH) 1. Catálogo</button>
+  <button class="tab-btn" data-tab="stock">(WH) 2. Stock &amp; Ventas</button>
+  <button class="tab-btn" data-tab="pedidos">(WH) Pedidos guardados</button>
+  <button class="tab-btn" data-tab="pedido">(WH) 3. Pedido Wholesale</button>
+  <button class="tab-btn" data-tab="dashboard">(WH) 4. Dashboard traspasos</button>
+  <button class="tab-btn" data-tab="abastecidas">(WH) 5. Abastecidas</button>
   <button class="tab-btn" data-tab="repo">Repo semanal</button>
+  <button class="tab-btn" data-tab="traspasos">Revisar traspasos</button>
   <button class="tab-btn" data-tab="factura">Factura</button>
   <button class="tab-btn" data-tab="config">Reglas / Config</button>
 </nav>
@@ -95,7 +96,7 @@
       <div class="table-scroll"><table id="tablePedidos"><thead><tr>
         <th>Título</th><th>Cliente</th><th>Líneas</th><th>Pendientes de aprobar</th><th>Última actualización</th><th></th>
       </tr></thead><tbody></tbody></table></div>
-      <p class="muted" id="pedidosEmpty">Todavía no has guardado ningún pedido. Ve a "3. Pedido Wholesale" para empezar uno y guardarlo con un título.</p>
+      <p class="muted" id="pedidosEmpty">Todavía no has guardado ningún pedido. Ve a "(WH) 3. Pedido Wholesale" para empezar uno y guardarlo con un título.</p>
     </div>
   </section>
 
@@ -171,7 +172,7 @@
   <!-- TAB REPO SEMANAL -->
   <section id="tab-repo" class="tab-panel">
     <h2>Repo semanal entre tiendas</h2>
-    <p class="hint">Carga aquí el CSV del report con el stock y las ventas del último mes de cada tienda (Amigó, Madrid, Rambla, Valencia). Por cada SKU, la app calcula el stock que "le correspondería" a cada tienda repartiendo el stock total según el peso de ventas de cada una, y sugiere traspasos desde las tiendas con sobrante hacia las que tienen falta. Revisa el resultado y edita, quita o añade a mano cualquier traspaso antes de descargar los CSV.</p>
+    <p class="hint">Carga aquí el CSV del report con el stock y las ventas del último mes de cada tienda (Amigó, Madrid, Rambla, Valencia). Las referencias Wholesale (SKU "WH-..." o nombre "(WH)...") se omiten automáticamente. Si el report trae también una columna de ventas online del último mes, mapéala aparte: se suma a las de Amigó para reflejar la venta real que sale de ese almacén. Por cada SKU, la app calcula el stock que "le correspondería" a cada tienda repartiendo el stock total según el peso de ventas de cada una, y sugiere traspasos desde las tiendas con sobrante hacia las que tienen falta.</p>
     <div class="card">
       <label class="btn-primary file-label">Elegir CSV del report
         <input type="file" id="inputRepoReport" accept=".csv" hidden>
@@ -182,18 +183,21 @@
     <div class="card">
       <button id="btnCalcularRepo" class="btn-primary">Calcular sugerencias de traspaso</button>
       <span class="muted" id="repoCalcInfo"></span>
+      <p class="hint" style="margin:10px 0 0">Ve a la pestaña <strong>"Revisar traspasos"</strong> para ver, filtrar y editar a mano el resultado antes de descargar los CSV.</p>
     </div>
+  </section>
+
+  <!-- TAB REVISAR TRASPASOS -->
+  <section id="tab-traspasos" class="tab-panel">
+    <h2>Revisar y corregir traspasos</h2>
     <div class="card">
       <div class="card-header">
         <h3>Traspasos por SKU</h3>
         <input type="search" id="repoFilter" placeholder="Filtrar por SKU o nombre...">
       </div>
-      <div class="table-scroll"><table id="tableRepo"><thead><tr>
-        <th>Producto</th><th>SKU</th>
-        <th>Stock AMI</th><th>Stock MAD</th><th>Stock RAM</th><th>Stock VLC</th>
-        <th>Ventas 1m AMI</th><th>Ventas 1m MAD</th><th>Ventas 1m RAM</th><th>Ventas 1m VLC</th>
-        <th>Traspasos</th>
-      </tr></thead><tbody></tbody></table></div>
+      <p class="hint">Las columnas Top20 muestran si la referencia está entre las 20 más vendidas del último mes en esa tienda (excluyendo gift cards, envoltorios/regalo y accesorios — configurable en "Reglas / Config"). Cada columna de traspaso es editable directamente; pulsa el embudo ▾ de su cabecera para ver solo las filas con movimiento en esa columna.</p>
+      <div id="repoColFilterInfo" class="inline-fields"></div>
+      <div class="table-scroll"><table id="tableRepo"><thead><tr></tr></thead><tbody></tbody></table></div>
     </div>
     <div class="card">
       <h3>Resumen</h3>
@@ -208,7 +212,7 @@
   <!-- TAB FACTURA -->
   <section id="tab-factura" class="tab-panel">
     <h2>Factura del pedido</h2>
-    <p class="hint">Se genera a partir de las líneas y precios de "3. Pedido Wholesale". Marca el cliente como internacional para eximir el IVA (exportación / operación intracomunitaria); a los clientes nacionales se les aplica el IVA configurado en Reglas/Config.</p>
+    <p class="hint">Se genera a partir de las líneas y precios de "(WH) 3. Pedido Wholesale". Marca el cliente como internacional para eximir el IVA (exportación / operación intracomunitaria); a los clientes nacionales se les aplica el IVA configurado en Reglas/Config.</p>
     <div id="facturaContent"></div>
   </section>
 
@@ -252,6 +256,12 @@
           <option value="ventas_asc" selected>Amigó primero, luego menor venta reciente</option>
           <option value="stock_desc">Amigó primero, luego mayor stock sobrante</option>
         </select>
+      </label>
+      <label>Top20: prefijos de SKU a excluir (separados por coma)
+        <input type="text" id="cfgTop20ExcludePrefixes" value="ACC,GC">
+      </label>
+      <label>Top20: palabras del nombre a excluir (separadas por coma)
+        <input type="text" id="cfgTop20ExcludeKeywords" value="gift card,tarjeta regalo,envoltorio,papel de regalo,bolsa de regalo,accesorio,gift wrap">
       </label>
       <button id="btnSaveConfig" class="btn-primary">Guardar criterios</button>
     </div>

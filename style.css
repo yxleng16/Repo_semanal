@@ -131,6 +131,18 @@ tbody tr:hover{background:var(--bg);}
 .alloc-store.warn{color:var(--warn);}
 .alloc-store.zero{color:var(--danger);}
 
+.top20-yes{color:var(--ok);font-weight:700;}
+.top20-no{color:var(--muted);}
+
+#tableRepo .movPairInput{width:52px;padding:4px 6px;text-align:right;}
+#tableRepo th.movCol{white-space:nowrap;}
+.colFilterBtn{
+  border:none;background:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0 0 3px;vertical-align:middle;
+}
+.colFilterBtn:hover{color:var(--text);}
+.colFilterBtn.active{color:var(--accent);font-weight:700;}
+th.colFilterActive{background:#dbeafe;color:var(--text);}
+
 .toast{
   position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);
   background:var(--primary);color:var(--primary-text);padding:10px 18px;border-radius:8px;
