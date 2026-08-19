@@ -15,7 +15,11 @@ function defaultState() {
       aliasRodio: ['RODIO', 'RO', 'RH'],
       materialDefault: 'ORO',
     },
-    config: { salesWindowDays: 30, salesThreshold: 15, warnLastUnit: true, secondaryCriterion: 'ventas_asc' },
+    config: {
+      salesWindowDays: 30, salesThreshold: 15, warnLastUnit: true, secondaryCriterion: 'ventas_asc',
+      top20ExcludePrefixes: ['ACC', 'GC'],
+      top20ExcludeKeywords: ['gift card', 'tarjeta regalo', 'envoltorio', 'papel de regalo', 'bolsa de regalo', 'accesorio', 'gift wrap'],
+    },
     facturaConfig: { empresaNombre: '', empresaNif: '', empresaDireccion: '', ivaPorcentaje: 21, facturaCounter: 1 },
     catalog: [],            // {base, talla, material, matchKey, nombre, variante, whSku, searchText}
     stockWholesale: {},     // whSku (literal) -> qty
@@ -25,7 +29,7 @@ function defaultState() {
     dashboard: [],           // resultado calculado del pedido actualmente abierto
     pedidos: [],             // pedidos guardados: {id, titulo, cliente, creadoEn, actualizadoEn, pedido, dashboard}
     pedidoActualId: null,    // id del pedido abierto en state.pedido/state.dashboard, o null si es un borrador sin guardar
-    repoSemanal: { rows: [] }, // [{sku, nombre, stock:{AMIGO..}, sales:{AMIGO..}, movimientos:[{from,to,qty}]}]
+    repoSemanal: { rows: [], colFilters: [] }, // rows: [{sku, nombre, stock:{AMIGO..}, sales:{AMIGO..}, movimientos:[{from,to,qty}], top20:{AMIGO..}}]
   };
 }
 
@@ -40,6 +44,8 @@ function mergeIntoDefault(parsed) {
   if (!Array.isArray(merged.catalogRules.aliasOro)) merged.catalogRules.aliasOro = def.catalogRules.aliasOro;
   if (!Array.isArray(merged.catalogRules.aliasRodio)) merged.catalogRules.aliasRodio = def.catalogRules.aliasRodio;
   merged.config = Object.assign({}, def.config, parsed && parsed.config);
+  if (!Array.isArray(merged.config.top20ExcludePrefixes)) merged.config.top20ExcludePrefixes = def.config.top20ExcludePrefixes;
+  if (!Array.isArray(merged.config.top20ExcludeKeywords)) merged.config.top20ExcludeKeywords = def.config.top20ExcludeKeywords;
   merged.facturaConfig = Object.assign({}, def.facturaConfig, parsed && parsed.facturaConfig);
   if (!Array.isArray(merged.pedidos)) merged.pedidos = [];
   merged.pedidos.forEach(p => {
@@ -51,11 +57,14 @@ function mergeIntoDefault(parsed) {
   });
   merged.repoSemanal = Object.assign({}, def.repoSemanal, parsed && parsed.repoSemanal);
   if (!Array.isArray(merged.repoSemanal.rows)) merged.repoSemanal.rows = [];
+  if (!Array.isArray(merged.repoSemanal.colFilters)) merged.repoSemanal.colFilters = [];
   merged.repoSemanal.rows.forEach(r => {
     if (!r.stock) r.stock = {};
     if (!r.sales) r.sales = {};
     STORES.forEach(s => { if (r.stock[s] === undefined) r.stock[s] = 0; if (r.sales[s] === undefined) r.sales[s] = 0; });
     if (!Array.isArray(r.movimientos)) r.movimientos = [];
+    if (!r.top20) r.top20 = {};
+    STORES.forEach(s => { if (r.top20[s] === undefined) r.top20[s] = false; });
   });
   return merged;
 }
@@ -1323,6 +1332,44 @@ function renderRepoImportCount() {
   document.getElementById('repoImportCount').textContent = state.repoSemanal.rows.length;
 }
 
+// Las referencias Wholesale (SKU con el prefijo configurado, p.ej. "WH-...",
+// o nombre que empieza por "(WH)") no participan en la repo semanal entre
+// tiendas físicas — se omiten directamente al importar el CSV del report.
+function isWholesaleRepoRow(sku, nombre) {
+  const prefix = (state.catalogRules.whPrefix || 'WH-').toUpperCase();
+  const skuUp = (sku || '').toUpperCase();
+  const nombreUp = (nombre || '').toUpperCase().trim();
+  return (prefix && skuUp.startsWith(prefix)) || nombreUp.startsWith('(WH)');
+}
+
+// Excluye del cálculo del Top20 las referencias que no son un producto real
+// en venta (gift cards, envoltorios/opciones de regalo, accesorios...),
+// según los prefijos de SKU y palabras clave de nombre configurados.
+function isRealProductForTop20(row) {
+  const sku = (row.sku || '').toUpperCase();
+  const nombre = (row.nombre || '').toUpperCase();
+  const prefixes = state.config.top20ExcludePrefixes || [];
+  const keywords = state.config.top20ExcludeKeywords || [];
+  if (prefixes.some(p => p && sku.startsWith(p.toUpperCase()))) return false;
+  if (keywords.some(k => k && nombre.includes(k.toUpperCase()))) return false;
+  return true;
+}
+
+// Marca, por tienda, las 20 referencias con más ventas en el último mes
+// (de entre los productos reales) — se recalcula tras importar o pulsar
+// "Calcular sugerencias de traspaso".
+function computeTop20() {
+  STORES.forEach(s => {
+    const eligible = state.repoSemanal.rows.filter(r => isRealProductForTop20(r) && (r.sales[s] || 0) > 0);
+    eligible.sort((a, b) => (b.sales[s] || 0) - (a.sales[s] || 0));
+    const topSkus = new Set(eligible.slice(0, 20).map(r => r.sku));
+    state.repoSemanal.rows.forEach(r => {
+      if (!r.top20) r.top20 = {};
+      r.top20[s] = topSkus.has(r.sku);
+    });
+  });
+}
+
 document.getElementById('inputRepoReport').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
@@ -1340,13 +1387,16 @@ document.getElementById('inputRepoReport').addEventListener('change', async (e) 
   renderMapping(container, headers, fields, (mapping) => {
     const bySku = {};
     const fresh = [];
+    let skippedWholesale = 0;
     rows.forEach(r => {
       const sku = normalizeSku(r[mapping.sku]);
       if (!sku) return;
+      const nombreRaw = (mapping.nombre !== null ? r[mapping.nombre] : '') || sku;
+      if (isWholesaleRepoRow(sku, nombreRaw)) { skippedWholesale++; return; }
       let entry = bySku[sku];
       if (!entry) {
-        entry = { sku, nombre: (mapping.nombre !== null ? r[mapping.nombre] : '') || sku, stock: {}, sales: {}, movimientos: [] };
-        STORES.forEach(s => { entry.stock[s] = 0; entry.sales[s] = 0; });
+        entry = { sku, nombre: nombreRaw, stock: {}, sales: {}, movimientos: [], top20: {} };
+        STORES.forEach(s => { entry.stock[s] = 0; entry.sales[s] = 0; entry.top20[s] = false; });
         bySku[sku] = entry;
         fresh.push(entry);
       }
@@ -1364,10 +1414,11 @@ document.getElementById('inputRepoReport').addEventListener('change', async (e) 
       });
     });
     state.repoSemanal.rows = fresh;
+    computeTop20();
     saveState();
     renderRepoImportCount();
     renderRepoTable();
-    toast(`Repo semanal: ${fresh.length} SKUs importados.`);
+    toast(`Repo semanal: ${fresh.length} SKUs importados` + (skippedWholesale ? ` (${skippedWholesale} Wholesale omitidos).` : '.'));
   });
 });
 
@@ -1418,83 +1469,127 @@ document.getElementById('btnCalcularRepo').addEventListener('click', () => {
   state.repoSemanal.rows.forEach(row => {
     row.movimientos = computeMovimientosFromNec(computeNecesidades(row));
   });
+  computeTop20();
   saveState();
   renderRepoTable();
   document.getElementById('repoCalcInfo').textContent = `Calculado a las ${new Date().toLocaleTimeString('es-ES')}`;
 });
 
-function repoMovimientosHtml(row) {
-  const items = (row.movimientos || []).map((m, mi) => `
-    <div class="alloc-store">
-      <span>${STORE_ABBR[m.from]} → ${STORE_ABBR[m.to]}</span>
-      <input type="number" min="0" value="${m.qty}" class="movQtyInput" data-sku="${row.sku}" data-mi="${mi}">
-      <button class="btn-small movRemoveBtn" data-sku="${row.sku}" data-mi="${mi}">✕</button>
-    </div>`).join('');
-  const options = STORES.map(s => `<option value="${s}">${STORE_ABBR[s]}</option>`).join('');
-  const addForm = `
-    <div class="alloc-store movAddForm" data-sku="${row.sku}">
-      <select class="movFrom">${options}</select>
-      <span>→</span>
-      <select class="movTo">${options}</select>
-      <input type="number" min="1" value="1" class="movQtyNew" style="width:50px">
-      <button class="btn-small movAddBtn" data-sku="${row.sku}">+ Añadir</button>
-    </div>`;
-  return `<div class="alloc-row">${items}${addForm}</div>`;
+function movQtyForPair(row, from, to) {
+  const m = (row.movimientos || []).find(mv => mv.from === from && mv.to === to);
+  return m ? m.qty : 0;
 }
 
+function setMovQtyForPair(row, from, to, qty) {
+  if (!Array.isArray(row.movimientos)) row.movimientos = [];
+  const m = row.movimientos.find(mv => mv.from === from && mv.to === to);
+  if (qty <= 0) {
+    if (m) row.movimientos = row.movimientos.filter(mv => mv !== m);
+  } else if (m) {
+    m.qty = qty;
+  } else {
+    row.movimientos.push({ from, to, qty });
+  }
+}
+
+// Cabecera de cada columna de traspaso: el icono de embudo activa/desactiva
+// el filtro "solo filas con movimiento en esta columna" (varias a la vez se
+// combinan con OR, como pedía revisar cada traspaso por separado).
+function repoTableHeadHtml() {
+  const top20Th = STORES.map(s => `<th>Top20 ${STORE_ABBR[s]}</th>`).join('');
+  const stockSalesTh = STORES.map(s => `<th>Ventas 1m ${STORE_ABBR[s]}</th><th>Stock ${STORE_ABBR[s]}</th>`).join('');
+  const activeFilters = state.repoSemanal.colFilters || [];
+  const movTh = MOVEMENT_ORDER.map(([f, t]) => {
+    const key = f + '>' + t;
+    const active = activeFilters.includes(key);
+    return `<th class="movCol${active ? ' colFilterActive' : ''}">${STORE_ABBR[f]}→${STORE_ABBR[t]}
+      <button type="button" class="colFilterBtn${active ? ' active' : ''}" data-pair="${key}" title="Ver solo filas con movimiento en ${STORE_ABBR[f]}→${STORE_ABBR[t]}">▾</button></th>`;
+  }).join('');
+  return `<tr><th>Producto</th><th>SKU</th>${top20Th}${stockSalesTh}${movTh}</tr>`;
+}
+
+// Reconstruir la tabla (thead+tbody) dentro del propio handler "change" de un
+// <input> puede hacer que el navegador dispare otro "change" reentrante para
+// ese mismo input al retirarlo del DOM todavía enfocado (efecto secundario
+// del blur implícito). Este candado evita procesar esa llamada duplicada,
+// que si no se filtra deja los botones de filtro con dos listeners y anula
+// su clic (empuja y quita el filtro en el mismo gesto).
+let repoTableRenderBusy = false;
 function renderRepoTable() {
+  if (repoTableRenderBusy) return;
+  repoTableRenderBusy = true;
+  try {
+    renderRepoTableInner();
+  } finally {
+    repoTableRenderBusy = false;
+  }
+}
+
+function renderRepoTableInner() {
+  document.querySelector('#tableRepo thead').innerHTML = repoTableHeadHtml();
   const tbody = document.querySelector('#tableRepo tbody');
   tbody.innerHTML = '';
   const filterVal = (document.getElementById('repoFilter').value || '').toLowerCase();
-  const rows = state.repoSemanal.rows.filter(r =>
+  const activeFilters = state.repoSemanal.colFilters || [];
+  let rows = state.repoSemanal.rows.filter(r =>
     !filterVal || r.sku.toLowerCase().includes(filterVal) || (r.nombre || '').toLowerCase().includes(filterVal)
   );
+  if (activeFilters.length) {
+    rows = rows.filter(r => activeFilters.some(key => {
+      const [f, t] = key.split('>');
+      return movQtyForPair(r, f, t) > 0;
+    }));
+  }
+
   sortByNombre(rows, r => r.nombre).forEach(({ item: row }) => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${row.nombre}</td><td>${row.sku}</td>` +
-      STORES.map(s => `<td>${row.stock[s] || 0}</td>`).join('') +
-      STORES.map(s => `<td>${row.sales[s] || 0}</td>`).join('') +
-      `<td>${repoMovimientosHtml(row)}</td>`;
+    const top20Td = STORES.map(s => `<td class="${row.top20 && row.top20[s] ? 'top20-yes' : 'top20-no'}">${row.top20 && row.top20[s] ? 'SI' : 'NO'}</td>`).join('');
+    const stockSalesTd = STORES.map(s => `<td>${row.sales[s] || 0}</td><td>${row.stock[s] || 0}</td>`).join('');
+    const movTd = MOVEMENT_ORDER.map(([f, t]) => {
+      const qty = movQtyForPair(row, f, t);
+      return `<td><input type="number" min="0" value="${qty}" class="movPairInput" data-sku="${row.sku}" data-from="${f}" data-to="${t}"></td>`;
+    }).join('');
+    tr.innerHTML = `<td>${row.nombre}</td><td>${row.sku}</td>${top20Td}${stockSalesTd}${movTd}`;
     tbody.appendChild(tr);
   });
 
-  tbody.querySelectorAll('.movQtyInput').forEach(inp => {
+  tbody.querySelectorAll('.movPairInput').forEach(inp => {
     inp.addEventListener('change', (e) => {
       const row = state.repoSemanal.rows.find(r => r.sku === e.target.dataset.sku);
-      const mi = parseInt(e.target.dataset.mi, 10);
       const v = Math.max(0, parseInt(e.target.value, 10) || 0);
-      if (v === 0) row.movimientos.splice(mi, 1);
-      else row.movimientos[mi].qty = v;
+      setMovQtyForPair(row, e.target.dataset.from, e.target.dataset.to, v);
       saveState();
       renderRepoTable();
-      renderRepoSummary();
-    });
-  });
-  tbody.querySelectorAll('.movRemoveBtn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const row = state.repoSemanal.rows.find(r => r.sku === e.target.dataset.sku);
-      row.movimientos.splice(parseInt(e.target.dataset.mi, 10), 1);
-      saveState();
-      renderRepoTable();
-      renderRepoSummary();
-    });
-  });
-  tbody.querySelectorAll('.movAddBtn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const row = state.repoSemanal.rows.find(r => r.sku === e.target.dataset.sku);
-      const wrap = e.target.closest('.movAddForm');
-      const from = wrap.querySelector('.movFrom').value;
-      const to = wrap.querySelector('.movTo').value;
-      const qty = Math.max(1, parseInt(wrap.querySelector('.movQtyNew').value, 10) || 1);
-      if (from === to) { toast('Origen y destino no pueden ser la misma tienda.'); return; }
-      row.movimientos.push({ from, to, qty });
-      saveState();
-      renderRepoTable();
-      renderRepoSummary();
     });
   });
 
+  document.querySelectorAll('#tableRepo thead .colFilterBtn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const key = e.target.dataset.pair;
+      const idx = state.repoSemanal.colFilters.indexOf(key);
+      if (idx === -1) state.repoSemanal.colFilters.push(key);
+      else state.repoSemanal.colFilters.splice(idx, 1);
+      saveState();
+      renderRepoTable();
+    });
+  });
+
+  renderRepoFilterInfo();
   renderRepoSummary();
+}
+
+function renderRepoFilterInfo() {
+  const el = document.getElementById('repoColFilterInfo');
+  if (!el) return;
+  const active = state.repoSemanal.colFilters || [];
+  if (!active.length) { el.innerHTML = ''; return; }
+  const labels = active.map(key => { const [f, t] = key.split('>'); return `${STORE_ABBR[f]}→${STORE_ABBR[t]}`; }).join(', ');
+  el.innerHTML = `<span class="muted">Filtrando solo filas con movimiento en: ${labels}</span> <button type="button" id="btnClearColFilters" class="btn-small">Quitar filtros de columna</button>`;
+  document.getElementById('btnClearColFilters').addEventListener('click', () => {
+    state.repoSemanal.colFilters = [];
+    saveState();
+    renderRepoTable();
+  });
 }
 
 document.getElementById('repoFilter').addEventListener('input', renderRepoTable);
@@ -1676,6 +1771,8 @@ function loadConfigForm() {
   document.getElementById('cfgSalesThreshold').value = state.config.salesThreshold;
   document.getElementById('cfgWarnLastUnit').checked = state.config.warnLastUnit;
   document.getElementById('cfgSecondaryCriterion').value = state.config.secondaryCriterion;
+  document.getElementById('cfgTop20ExcludePrefixes').value = state.config.top20ExcludePrefixes.join(',');
+  document.getElementById('cfgTop20ExcludeKeywords').value = state.config.top20ExcludeKeywords.join(',');
   document.getElementById('cfgEmpresaNombre').value = state.facturaConfig.empresaNombre;
   document.getElementById('cfgEmpresaNif').value = state.facturaConfig.empresaNif;
   document.getElementById('cfgEmpresaDireccion').value = state.facturaConfig.empresaDireccion;
@@ -1700,8 +1797,13 @@ document.getElementById('btnSaveConfig').addEventListener('click', () => {
   state.config.salesThreshold = parseInt(document.getElementById('cfgSalesThreshold').value, 10) || 0;
   state.config.warnLastUnit = document.getElementById('cfgWarnLastUnit').checked;
   state.config.secondaryCriterion = document.getElementById('cfgSecondaryCriterion').value;
+  state.config.top20ExcludePrefixes = splitAliasList(document.getElementById('cfgTop20ExcludePrefixes').value);
+  state.config.top20ExcludeKeywords = document.getElementById('cfgTop20ExcludeKeywords').value
+    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  computeTop20();
   saveState();
   renderStoreSalesSummary();
+  renderRepoTable();
   toast('Criterios guardados. Vuelve a importar ventas si cambió la ventana de días.');
 });
 
@@ -1762,6 +1864,7 @@ function renderAll() {
   renderPedidosTab();
   renderFactura();
   renderRepoImportCount();
+  computeTop20();
   renderRepoTable();
   loadConfigForm();
   saveState();

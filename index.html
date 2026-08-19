@@ -188,12 +188,9 @@
         <h3>Traspasos por SKU</h3>
         <input type="search" id="repoFilter" placeholder="Filtrar por SKU o nombre...">
       </div>
-      <div class="table-scroll"><table id="tableRepo"><thead><tr>
-        <th>Producto</th><th>SKU</th>
-        <th>Stock AMI</th><th>Stock MAD</th><th>Stock RAM</th><th>Stock VLC</th>
-        <th>Ventas 1m AMI</th><th>Ventas 1m MAD</th><th>Ventas 1m RAM</th><th>Ventas 1m VLC</th>
-        <th>Traspasos</th>
-      </tr></thead><tbody></tbody></table></div>
+      <p class="hint">Las columnas Top20 muestran si la referencia está entre las 20 más vendidas del último mes en esa tienda (excluyendo gift cards, envoltorios/regalo y accesorios — configurable en "Reglas / Config"). Cada columna de traspaso es editable directamente; pulsa el embudo ▾ de su cabecera para ver solo las filas con movimiento en esa columna.</p>
+      <div id="repoColFilterInfo" class="inline-fields"></div>
+      <div class="table-scroll"><table id="tableRepo"><thead><tr></tr></thead><tbody></tbody></table></div>
     </div>
     <div class="card">
       <h3>Resumen</h3>
@@ -252,6 +249,12 @@
           <option value="ventas_asc" selected>Amigó primero, luego menor venta reciente</option>
           <option value="stock_desc">Amigó primero, luego mayor stock sobrante</option>
         </select>
+      </label>
+      <label>Top20: prefijos de SKU a excluir (separados por coma)
+        <input type="text" id="cfgTop20ExcludePrefixes" value="ACC,GC">
+      </label>
+      <label>Top20: palabras del nombre a excluir (separadas por coma)
+        <input type="text" id="cfgTop20ExcludeKeywords" value="gift card,tarjeta regalo,envoltorio,papel de regalo,bolsa de regalo,accesorio,gift wrap">
       </label>
       <button id="btnSaveConfig" class="btn-primary">Guardar criterios</button>
     </div>
