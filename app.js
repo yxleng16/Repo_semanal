@@ -19,6 +19,11 @@ function defaultState() {
       salesWindowDays: 30, salesThreshold: 15, warnLastUnit: true, secondaryCriterion: 'ventas_asc',
       top20ExcludePrefixes: ['ACC', 'GC'],
       top20ExcludeKeywords: ['gift card', 'tarjeta regalo', 'envoltorio', 'papel de regalo', 'bolsa de regalo', 'accesorio', 'gift wrap'],
+      // Reglas de traspaso de la repo semanal (ver computeMovimientosParaFila).
+      repoBufferMadrid: 2,
+      repoBufferRamblaValencia: 1,
+      repoAmigoProtectedMargin: 1,
+      repoAmigoTop20MinStock: 3,
     },
     facturaConfig: { empresaNombre: '', empresaNif: '', empresaDireccion: '', ivaPorcentaje: 21, facturaCounter: 1 },
     catalog: [],            // {base, talla, material, matchKey, nombre, variante, whSku, searchText}
@@ -46,6 +51,9 @@ function mergeIntoDefault(parsed) {
   merged.config = Object.assign({}, def.config, parsed && parsed.config);
   if (!Array.isArray(merged.config.top20ExcludePrefixes)) merged.config.top20ExcludePrefixes = def.config.top20ExcludePrefixes;
   if (!Array.isArray(merged.config.top20ExcludeKeywords)) merged.config.top20ExcludeKeywords = def.config.top20ExcludeKeywords;
+  ['repoBufferMadrid', 'repoBufferRamblaValencia', 'repoAmigoProtectedMargin', 'repoAmigoTop20MinStock'].forEach(k => {
+    if (typeof merged.config[k] !== 'number' || isNaN(merged.config[k])) merged.config[k] = def.config[k];
+  });
   merged.facturaConfig = Object.assign({}, def.facturaConfig, parsed && parsed.facturaConfig);
   if (!Array.isArray(merged.pedidos)) merged.pedidos = [];
   merged.pedidos.forEach(p => {
@@ -1446,54 +1454,99 @@ document.getElementById('inputRepoReport').addEventListener('change', async (e) 
   });
 });
 
-// Reparte el stock total de un SKU entre tiendas proporcionalmente a su peso
-// de ventas (método del resto mayor, para que la suma cuadre exactamente con
-// el stock total) y devuelve cuánto le falta o le sobra a cada una.
-function computeNecesidades(row) {
-  const nec = {};
-  STORES.forEach(s => { nec[s] = 0; });
-  const stockTotal = STORES.reduce((a, s) => a + (row.stock[s] || 0), 0);
-  const salesTotal = STORES.reduce((a, s) => a + (row.sales[s] || 0), 0);
-  if (stockTotal <= 0 || salesTotal <= 0) return nec;
-
-  const raw = {};
-  STORES.forEach(s => { raw[s] = stockTotal * (row.sales[s] || 0) / salesTotal; });
-  const floor = {};
-  let flooredSum = 0;
-  STORES.forEach(s => { floor[s] = Math.floor(raw[s]); flooredSum += floor[s]; });
-  let remaining = stockTotal - flooredSum;
-  const byRemainderDesc = [...STORES].sort((a, b) => (raw[b] - floor[b]) - (raw[a] - floor[a]));
-  for (let i = 0; i < remaining; i++) floor[byRemainderDesc[i]] += 1;
-
-  STORES.forEach(s => { nec[s] = floor[s] - (row.stock[s] || 0); });
-  return nec;
-}
-
-// Empareja la tienda con mayor sobrante con la que tiene mayor necesidad,
-// repitiendo hasta agotar sobrantes/necesidades (que siempre suman lo mismo).
-function computeMovimientosFromNec(nec) {
-  const surplus = STORES.filter(s => nec[s] < 0).map(s => ({ store: s, qty: -nec[s] }));
-  const need = STORES.filter(s => nec[s] > 0).map(s => ({ store: s, qty: nec[s] }));
+// Calcula los traspasos de un SKU según necesidad real, no proporción de
+// ventas: cada tienda destino tiene un margen objetivo (ventas + colchón) y
+// se cubre encadenando orígenes con Amigó primero, respetando el margen que
+// cada origen debe conservar. Si el SKU es top20 de la tienda destino, se
+// asume una necesidad extrema (p.ej. su referencia más vendida) y se relaja
+// el margen protegido de Amigó (reserva mínima absoluta) más el de un único
+// origen secundario adicional (1ud, el que menos necesidad propia tenga).
+// Requiere que row.top20 esté ya calculado (ver computeTop20()).
+function computeMovimientosParaFila(row) {
+  const cfg = state.config;
+  const stock = {}, sales = {};
+  STORES.forEach(s => { stock[s] = row.stock[s] || 0; sales[s] = row.sales[s] || 0; });
   const movimientos = [];
-  while (surplus.length && need.length) {
-    surplus.sort((a, b) => b.qty - a.qty);
-    need.sort((a, b) => b.qty - a.qty);
-    const from = surplus[0], to = need[0];
-    const qty = Math.min(from.qty, to.qty);
-    if (qty > 0) movimientos.push({ from: from.store, to: to.store, qty });
-    from.qty -= qty; to.qty -= qty;
-    if (from.qty <= 0) surplus.shift();
-    if (to.qty <= 0) need.shift();
+
+  function needTarget(store) {
+    if (store === 'MADRID') return sales.MADRID + cfg.repoBufferMadrid;
+    if (store === 'AMIGO') return sales.AMIGO;
+    return sales[store] + cfg.repoBufferRamblaValencia;
   }
+
+  function addMov(from, to, qty) {
+    if (qty <= 0) return;
+    const existing = movimientos.find(m => m.from === from && m.to === to);
+    if (existing) existing.qty += qty; else movimientos.push({ from, to, qty });
+    stock[from] -= qty;
+    stock[to] += qty;
+  }
+
+  const destinos = STORES
+    .map(s => ({ store: s, shortage: needTarget(s) - stock[s], extreme: !!(row.top20 && row.top20[s]) }))
+    .filter(d => d.shortage > 0)
+    .sort((a, b) => b.shortage - a.shortage);
+
+  destinos.forEach(dest => {
+    let falta = needTarget(dest.store) - stock[dest.store];
+    if (falta <= 0) return;
+
+    if (dest.store !== 'AMIGO') {
+      const floorAmigo = dest.extreme ? cfg.repoAmigoTop20MinStock : (sales.AMIGO + cfg.repoAmigoProtectedMargin);
+      const disponible = stock.AMIGO - floorAmigo;
+      if (disponible > 0) {
+        const qty = Math.min(disponible, falta);
+        addMov('AMIGO', dest.store, qty);
+        falta -= qty;
+      }
+    }
+    if (falta <= 0) return;
+
+    if (dest.extreme) {
+      // Caso extremo (top20 del destino): no se sigue la cascada normal por
+      // margen en el resto de tiendas — como mucho 1ud de la que tenga menos
+      // necesidad propia de este SKU, y se acepta no cubrir el resto.
+      const candidatos = STORES
+        .filter(s => s !== 'AMIGO' && s !== dest.store && stock[s] > 1)
+        .sort((a, b) => (needTarget(a) - stock[a]) - (needTarget(b) - stock[b]));
+      if (candidatos.length) addMov(candidatos[0], dest.store, 1);
+      return;
+    }
+
+    STORES.filter(s => s !== 'AMIGO' && s !== dest.store).forEach(origin => {
+      if (falta <= 0) return;
+      const disponible = stock[origin] - sales[origin];
+      if (disponible <= 0) return;
+      const qty = Math.min(disponible, falta);
+      addMov(origin, dest.store, qty);
+      falta -= qty;
+    });
+  });
+
+  // Último recurso: si la cascada anterior no ha movido nada en absoluto
+  // (escasez real de todo el sistema, nadie tiene margen que ceder), se
+  // cede 1ud desde la tienda con mejor margen hacia la más urgente (más
+  // ventas y menos stock), aunque baje de su propio mínimo.
+  if (!movimientos.length) {
+    const enDeficit = STORES.filter(s => stock[s] < sales[s]);
+    if (enDeficit.length) {
+      enDeficit.sort((a, b) => (sales[b] - stock[b]) - (sales[a] - stock[a]));
+      const destino = enDeficit[0];
+      const candidatos = STORES.filter(s => s !== destino && stock[s] > 0)
+        .sort((a, b) => (stock[b] - sales[b]) - (stock[a] - sales[a]));
+      if (candidatos.length) addMov(candidatos[0], destino, 1);
+    }
+  }
+
   return movimientos;
 }
 
 document.getElementById('btnCalcularRepo').addEventListener('click', () => {
   if (!state.repoSemanal.rows.length) { toast('No hay datos importados todavía.'); return; }
-  state.repoSemanal.rows.forEach(row => {
-    row.movimientos = computeMovimientosFromNec(computeNecesidades(row));
-  });
   computeTop20();
+  state.repoSemanal.rows.forEach(row => {
+    row.movimientos = computeMovimientosParaFila(row);
+  });
   saveState();
   renderRepoTable();
   document.getElementById('repoCalcInfo').textContent = `Calculado a las ${new Date().toLocaleTimeString('es-ES')}`;
@@ -1935,6 +1988,10 @@ function loadConfigForm() {
   document.getElementById('cfgSecondaryCriterion').value = state.config.secondaryCriterion;
   document.getElementById('cfgTop20ExcludePrefixes').value = state.config.top20ExcludePrefixes.join(',');
   document.getElementById('cfgTop20ExcludeKeywords').value = state.config.top20ExcludeKeywords.join(',');
+  document.getElementById('cfgRepoBufferMadrid').value = state.config.repoBufferMadrid;
+  document.getElementById('cfgRepoBufferRamblaValencia').value = state.config.repoBufferRamblaValencia;
+  document.getElementById('cfgRepoAmigoProtectedMargin').value = state.config.repoAmigoProtectedMargin;
+  document.getElementById('cfgRepoAmigoTop20MinStock').value = state.config.repoAmigoTop20MinStock;
   document.getElementById('cfgEmpresaNombre').value = state.facturaConfig.empresaNombre;
   document.getElementById('cfgEmpresaNif').value = state.facturaConfig.empresaNif;
   document.getElementById('cfgEmpresaDireccion').value = state.facturaConfig.empresaDireccion;
@@ -1962,6 +2019,10 @@ document.getElementById('btnSaveConfig').addEventListener('click', () => {
   state.config.top20ExcludePrefixes = splitAliasList(document.getElementById('cfgTop20ExcludePrefixes').value);
   state.config.top20ExcludeKeywords = document.getElementById('cfgTop20ExcludeKeywords').value
     .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  state.config.repoBufferMadrid = parseInt(document.getElementById('cfgRepoBufferMadrid').value, 10) || 0;
+  state.config.repoBufferRamblaValencia = parseInt(document.getElementById('cfgRepoBufferRamblaValencia').value, 10) || 0;
+  state.config.repoAmigoProtectedMargin = parseInt(document.getElementById('cfgRepoAmigoProtectedMargin').value, 10) || 0;
+  state.config.repoAmigoTop20MinStock = parseInt(document.getElementById('cfgRepoAmigoTop20MinStock').value, 10) || 0;
   computeTop20();
   saveState();
   renderStoreSalesSummary();

@@ -269,6 +269,18 @@
       <label>Top20: palabras del nombre a excluir (separadas por coma)
         <input type="text" id="cfgTop20ExcludeKeywords" value="gift card,tarjeta regalo,envoltorio,papel de regalo,bolsa de regalo,accesorio,gift wrap">
       </label>
+      <label>Repo semanal: margen mínimo de Madrid (uds sobre sus ventas)
+        <input type="number" id="cfgRepoBufferMadrid" value="2" min="0">
+      </label>
+      <label>Repo semanal: margen mínimo de Rambla/Valencia (uds sobre sus ventas)
+        <input type="number" id="cfgRepoBufferRamblaValencia" value="1" min="0">
+      </label>
+      <label>Repo semanal: margen protegido de Amigó como origen (uds sobre sus ventas, caso normal)
+        <input type="number" id="cfgRepoAmigoProtectedMargin" value="1" min="0">
+      </label>
+      <label>Repo semanal: reserva mínima de Amigó como origen (uds de stock, caso top20 del destino)
+        <input type="number" id="cfgRepoAmigoTop20MinStock" value="3" min="0">
+      </label>
       <button id="btnSaveConfig" class="btn-primary">Guardar criterios</button>
     </div>
 
