@@ -1464,8 +1464,14 @@ document.getElementById('inputRepoReport').addEventListener('change', async (e) 
 // Requiere que row.top20 esté ya calculado (ver computeTop20()).
 function computeMovimientosParaFila(row) {
   const cfg = state.config;
-  const stock = {}, sales = {};
-  STORES.forEach(s => { stock[s] = row.stock[s] || 0; sales[s] = row.sales[s] || 0; });
+  // stock: cuánto tiene cada tienda "ahora mismo" en esta pasada (sube al
+  // recibir un traspaso, baja al enviar uno) — se usa para saber cuánto le
+  // sigue faltando a un destino. giveable: cuánto puede CEDER cada tienda
+  // como origen — solo baja al ceder, nunca sube al recibir, para que una
+  // tienda no pueda "redonar" stock que acaba de recibir para cubrir su
+  // propia carencia (eso dejaría un traspaso que hoy no existe realmente).
+  const stock = {}, giveable = {}, sales = {};
+  STORES.forEach(s => { stock[s] = row.stock[s] || 0; giveable[s] = row.stock[s] || 0; sales[s] = row.sales[s] || 0; });
   const movimientos = [];
 
   function needTarget(store) {
@@ -1480,6 +1486,7 @@ function computeMovimientosParaFila(row) {
     if (existing) existing.qty += qty; else movimientos.push({ from, to, qty });
     stock[from] -= qty;
     stock[to] += qty;
+    giveable[from] -= qty;
   }
 
   const destinos = STORES
@@ -1493,7 +1500,7 @@ function computeMovimientosParaFila(row) {
 
     if (dest.store !== 'AMIGO') {
       const floorAmigo = dest.extreme ? cfg.repoAmigoTop20MinStock : (sales.AMIGO + cfg.repoAmigoProtectedMargin);
-      const disponible = stock.AMIGO - floorAmigo;
+      const disponible = giveable.AMIGO - floorAmigo;
       if (disponible > 0) {
         const qty = Math.min(disponible, falta);
         addMov('AMIGO', dest.store, qty);
@@ -1507,7 +1514,7 @@ function computeMovimientosParaFila(row) {
       // margen en el resto de tiendas — como mucho 1ud de la que tenga menos
       // necesidad propia de este SKU, y se acepta no cubrir el resto.
       const candidatos = STORES
-        .filter(s => s !== 'AMIGO' && s !== dest.store && stock[s] > 1)
+        .filter(s => s !== 'AMIGO' && s !== dest.store && giveable[s] > 1)
         .sort((a, b) => (needTarget(a) - stock[a]) - (needTarget(b) - stock[b]));
       if (candidatos.length) addMov(candidatos[0], dest.store, 1);
       return;
@@ -1515,7 +1522,7 @@ function computeMovimientosParaFila(row) {
 
     STORES.filter(s => s !== 'AMIGO' && s !== dest.store).forEach(origin => {
       if (falta <= 0) return;
-      const disponible = stock[origin] - sales[origin];
+      const disponible = giveable[origin] - sales[origin];
       if (disponible <= 0) return;
       const qty = Math.min(disponible, falta);
       addMov(origin, dest.store, qty);
@@ -1532,7 +1539,7 @@ function computeMovimientosParaFila(row) {
     if (enDeficit.length) {
       enDeficit.sort((a, b) => (sales[b] - stock[b]) - (sales[a] - stock[a]));
       const destino = enDeficit[0];
-      const candidatos = STORES.filter(s => s !== destino && stock[s] > 0)
+      const candidatos = STORES.filter(s => s !== destino && giveable[s] > 0)
         .sort((a, b) => (stock[b] - sales[b]) - (stock[a] - sales[a]));
       if (candidatos.length) addMov(candidatos[0], destino, 1);
     }
