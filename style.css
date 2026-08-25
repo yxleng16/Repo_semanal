@@ -198,6 +198,31 @@ th.colFilterActive{background:#dbeafe;color:var(--text);}
 #tableRepo thead th:nth-child(1), #tableRepo thead th:nth-child(2){ z-index:4; }
 #tableRepo tbody tr:hover td:nth-child(1), #tableRepo tbody tr:hover td:nth-child(2){ background:var(--bg); }
 
+/* Al filtrar por una tienda concreta (chip AMI/MAD/RAM/VLC), sus columnas de
+   venta y stock se sacan del bloque normal (ver getPinnedStore en app.js) y
+   se fijan justo detrás de Producto/SKU, para poder comprobar ese dato sin
+   perderlo de vista al desplazar la tabla en horizontal. */
+#tableRepo td.pinned-col-1, #tableRepo th.pinned-col-1{
+  position:sticky;left:280px;z-index:2;background:var(--panel);
+  width:90px;min-width:90px;max-width:90px;
+}
+#tableRepo td.pinned-col-2, #tableRepo th.pinned-col-2{
+  position:sticky;left:370px;z-index:2;background:var(--panel);
+  width:90px;min-width:90px;max-width:90px;
+  box-shadow:2px 0 4px -2px rgba(0,0,0,.2);
+}
+#tableRepo thead th.pinned-col-1, #tableRepo thead th.pinned-col-2{ z-index:4; }
+#tableRepo tbody tr:hover td.pinned-col-1, #tableRepo tbody tr:hover td.pinned-col-2{ background:var(--bg); }
+/* Con columnas fijadas de por medio, el borde de "fin de zona fija" pasa a
+   la última columna fijada (pinned-col-2), no ya al SKU. */
+#tableRepo.store-pinned td:nth-child(2), #tableRepo.store-pinned th:nth-child(2){ box-shadow:none; }
+
+/* Resalta la fila y la columna de la celda pulsada, para comprobar más
+   fácil un dato concreto al revisar la tabla (ver el listener de clic sobre
+   #tableRepo tbody en app.js). */
+#tableRepo tbody tr.cell-selected-row > td{ background:#fef9c3 !important; }
+#tableRepo td.cell-selected-col, #tableRepo th.cell-selected-col{ background:#fef9c3 !important; }
+
 /* Oculta las 4 columnas Top20 (checkbox "Ocultar columnas Top20") */
 #tableRepo.hide-top20 .top20-col{ display:none; }
 
