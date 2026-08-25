@@ -195,7 +195,7 @@
         <h3>Traspasos por SKU</h3>
         <input type="search" id="repoFilter" placeholder="Filtrar por SKU o nombre...">
       </div>
-      <p class="hint">Las columnas Top20 muestran si la referencia está entre las 20 más vendidas del último mes en esa tienda (excluyendo gift cards, envoltorios/regalo y accesorios — configurable en "Reglas / Config"). Cada columna de traspaso es editable directamente; pulsa "▾ filtrar" en su cabecera para ver solo las filas con movimiento en esa columna, o usa los atajos de aquí abajo. Pulsa el nombre de cualquier cabecera para ordenar la tabla por esa columna. Las cantidades se resaltan en naranja cuando esa misma referencia tiene más de un traspaso a la vez, y en rojo cuando la cantidad supera el stock disponible en la tienda de origen. Producto y SKU quedan fijos al desplazar la tabla en horizontal.</p>
+      <p class="hint">Las columnas Top20 muestran si la referencia está entre las 20 más vendidas del último mes en esa tienda (excluyendo gift cards, envoltorios/regalo y accesorios — configurable en "Reglas / Config"). Cada columna de traspaso es editable directamente; pulsa "▾ filtrar" en su cabecera para ver solo las filas con movimiento en esa columna, o usa los atajos de aquí abajo. Pulsa el nombre de cualquier cabecera para ordenar la tabla por esa columna. Las cantidades se resaltan en naranja cuando esa misma referencia tiene más de un traspaso a la vez, y en rojo cuando la cantidad supera el stock disponible en la tienda de origen. Producto y SKU quedan fijos al desplazar la tabla en horizontal, y si filtras por una tienda con los atajos AMI/MAD/RAM/VLC también se fijan sus columnas de venta y stock. Pulsa cualquier celda para resaltar su fila y su columna y comprobar un dato más fácil.</p>
       <div class="repo-filter-toolbar">
         <label class="checkbox-label"><input type="checkbox" id="repoOnlyWithMov"> Mostrar solo filas con algún traspaso</label>
         <label class="checkbox-label"><input type="checkbox" id="repoHideTop20"> Ocultar columnas Top20</label>
@@ -265,6 +265,9 @@
       </label>
       <label>Top20: prefijos de SKU a excluir (separados por coma)
         <input type="text" id="cfgTop20ExcludePrefixes" value="ACC,GC">
+      </label>
+      <label>Repo semanal: prefijos de SKU a omitir del import (separados por coma)
+        <input type="text" id="cfgRepoImportExcludeSkuPrefixes" value="GIFT">
       </label>
       <label>Top20: palabras del nombre a excluir (separadas por coma)
         <input type="text" id="cfgTop20ExcludeKeywords" value="gift card,tarjeta regalo,envoltorio,papel de regalo,bolsa de regalo,accesorio,gift wrap">
