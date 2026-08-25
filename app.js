@@ -1349,7 +1349,12 @@ function storeGuessRegex(store, kind) {
   const abbr = STORE_ABBR[store].toLowerCase();
   const label = STORE_LABELS[store].toLowerCase();
   const kindPattern = kind === 'stock' ? '(stock|available|existenc)' : '(sales|ventas|vendid)';
-  return `(${abbr}|${label}).*${kindPattern}|${kindPattern}.*(${abbr}|${label})`;
+  const base = `(${abbr}|${label}).*${kindPattern}|${kindPattern}.*(${abbr}|${label})`;
+  if (kind !== 'sales') return base;
+  // Si el CSV trae ventas de varias ventanas (p.ej. "rambla_ventas_1m" y
+  // "rambla_ventas_3m"), no autoseleccionar las de 2 a 12 meses: solo debe
+  // proponerse automáticamente la columna de 1 mes (o sin periodo indicado).
+  return `(?!.*([2-9]|1[0-2])\\s*m(es(es)?)?\\b)(?:${base})`;
 }
 
 function renderRepoImportCount() {
