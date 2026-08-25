@@ -1572,6 +1572,15 @@ function computeMovimientosParaFila(row) {
     }
     if (falta <= 0) return;
 
+    // El colchón extra de Madrid (+2 en vez de +1) es "de casa": solo lo
+    // persigue Amigó. Si Amigó no ha llegado a cubrirlo del todo, el resto
+    // de tiendas como origen solo se esfuerzan por el mínimo base (como
+    // Rambla/Valencia), no por ese margen adicional.
+    if (dest.store === 'MADRID') {
+      falta = Math.max(0, (sales.MADRID + cfg.repoBufferRamblaValencia) - stock.MADRID);
+      if (falta <= 0) return;
+    }
+
     if (dest.extreme) {
       // Caso extremo (top20 del destino): no se sigue la cascada normal por
       // margen en el resto de tiendas — como mucho 1ud de la que tenga menos
@@ -1583,12 +1592,18 @@ function computeMovimientosParaFila(row) {
       return;
     }
 
-    STORES.filter(s => s !== 'AMIGO' && s !== dest.store).forEach(origin => {
-      if (falta <= 0) return;
+    // Se prefieren menos orígenes: se agota primero la tienda con más
+    // sobrante disponible (a ser posible, que cubra ella sola el resto de
+    // la necesidad) antes de repartir un poco entre varias.
+    const candidatosNormales = STORES
+      .filter(s => s !== 'AMIGO' && s !== dest.store)
       // Igual que con Amigó: el mínimo nunca es 0, ni siquiera cuando la
       // tienda origen no tuvo ninguna venta el último mes.
-      const disponible = giveable[origin] - Math.max(sales[origin], 1);
-      if (disponible <= 0) return;
+      .map(s => ({ store: s, disponible: giveable[s] - Math.max(sales[s], 1) }))
+      .filter(c => c.disponible > 0)
+      .sort((a, b) => b.disponible - a.disponible);
+    candidatosNormales.forEach(({ store: origin, disponible }) => {
+      if (falta <= 0) return;
       const qty = Math.min(disponible, falta);
       addMov(origin, dest.store, qty);
       falta -= qty;
