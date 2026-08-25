@@ -1467,6 +1467,40 @@ document.getElementById('inputRepoReport').addEventListener('change', async (e) 
 // el margen protegido de Amigó (reserva mínima absoluta) más el de un único
 // origen secundario adicional (1ud, el que menos necesidad propia tenga).
 // Requiere que row.top20 esté ya calculado (ver computeTop20()).
+
+// Si en la misma fila una tienda recibe de A y por separado envía a B (aun
+// usando stock propio previo, no el recién recibido), es más simple y
+// evita manipulación doble que A envíe directo a B — colapsa esas cadenas
+// A→intermedia→B en un único traspaso A→B mientras queden pares posibles.
+function consolidarCadenasIntermedias(movimientos) {
+  let cambiado = true;
+  while (cambiado) {
+    cambiado = false;
+    for (const intermedia of STORES) {
+      const entrantes = movimientos.filter(m => m.to === intermedia && m.qty > 0);
+      const salientes = movimientos.filter(m => m.from === intermedia && m.qty > 0);
+      for (const inc of entrantes) {
+        for (const out of salientes) {
+          if (inc.qty <= 0 || out.qty <= 0) continue;
+          const qty = Math.min(inc.qty, out.qty);
+          if (qty <= 0) continue;
+          if (inc.from === out.to) {
+            // A envía a la intermedia y esta reenvía justo a A: se anula,
+            // esas unidades no debían moverse en absoluto.
+            inc.qty -= qty; out.qty -= qty; cambiado = true; continue;
+          }
+          inc.qty -= qty; out.qty -= qty;
+          const directo = movimientos.find(m => m.from === inc.from && m.to === out.to);
+          if (directo) directo.qty += qty; else movimientos.push({ from: inc.from, to: out.to, qty });
+          cambiado = true;
+        }
+      }
+    }
+    movimientos = movimientos.filter(m => m.qty > 0);
+  }
+  return movimientos;
+}
+
 function computeMovimientosParaFila(row) {
   const cfg = state.config;
   // stock: cuánto tiene cada tienda "ahora mismo" en esta pasada (sube al
@@ -1550,7 +1584,7 @@ function computeMovimientosParaFila(row) {
     }
   }
 
-  return movimientos;
+  return consolidarCadenasIntermedias(movimientos);
 }
 
 document.getElementById('btnCalcularRepo').addEventListener('click', () => {
