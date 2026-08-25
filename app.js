@@ -1578,46 +1578,71 @@ function computeMovimientosParaFila(row) {
     .sort((a, b) => b.shortage - a.shortage);
 
   // 1) Casos extremos (top20 del destino) primero — Amigó se permite bajar
-  // mucho más (reserva mínima absoluta) y se acepta no cubrir el resto.
+  // mucho más (reserva mínima absoluta). Si el propio Amigó también tiene
+  // este SKU en su top20, protege esa reserva mínima igual que siempre. Si
+  // no, no hay motivo para retenerle más que su suelo normal (venta+margen)
+  // solo para proteger un SKU que ni siquiera vende — usa el que sea más
+  // permisivo de los dos suelos, nunca el más restrictivo de ambos.
   destinos.filter(d => extreme[d.store]).forEach(dest => {
     if (dest.store === 'AMIGO') return; // Amigó no se traspasa a sí mismo.
     const falta = fullNeedTarget(dest.store) - stock[dest.store];
     if (falta <= 0) return;
-    const floorAmigo = Math.max(cfg.repoAmigoTop20MinStock, 1);
+    const floorTop20 = Math.max(cfg.repoAmigoTop20MinStock, 1);
+    const floorAmigo = extreme.AMIGO ? floorTop20 : Math.min(floorTop20, floorAmigoNormal());
     const disponible = giveable.AMIGO - floorAmigo;
     if (disponible > 0) addMov('AMIGO', dest.store, Math.min(disponible, falta));
   });
 
-  // 2) Tiendas normales: si el SKU está en escasez real, se reparte de 1 en
-  // 1 hacia quien peor margen (stock-ventas) tenga en cada momento, para no
-  // dejar a una sin nada mientras otra llega a su objetivo completo. Si no
-  // hay escasez, se cubre primero el mínimo real (que el stock llegue a
-  // cubrir la venta) de cada tienda por orden de mayor carencia, y solo
-  // después se intenta subir hacia el margen extra (+1 Rambla/Valencia, +2
-  // Madrid) con lo que le quede a Amigó — ese margen extra de Madrid es "de
-  // casa": solo Amigó lo persigue, el resto de tiendas no se esfuerza por
-  // encima del mínimo real de Madrid.
-  if (escasez) {
-    let guard = 0;
-    while (guard++ < 200) {
-      const necesitadas = normales.filter(s => sales[s] - stock[s] > 0);
-      if (!necesitadas.length) break;
-      necesitadas.sort((a, b) => (stock[a] - sales[a]) - (stock[b] - sales[b]));
-      const destino = necesitadas[0];
-      let origen = null;
-      if (destino !== 'AMIGO' && giveable.AMIGO - floorAmigoNormal() > 0) {
-        origen = 'AMIGO';
-      } else {
-        const candidatos = normales
-          .filter(s => s !== destino && giveable[s] - floorOrigen(s) > 0)
-          .sort((a, b) => (stock[b] - sales[b]) - (stock[a] - sales[a]));
-        if (candidatos.length) origen = candidatos[0];
-      }
-      if (!origen) break;
-      addMov(origen, destino, 1);
+  // 2) Tiendas normales, en tres pasadas de prioridad decreciente:
+  //   a) venta base (breakeven): se reparte de 1 en 1 hacia quien peor
+  //      margen (stock-ventas) tenga en cada momento, para no dejar a una
+  //      tienda sin nada mientras otra ya cubierta sigue recibiendo. En
+  //      escasez real los suelos se relajan -1 (vía floorAmigoNormal /
+  //      floorOrigen) y el reparto se convierte en un reparto equitativo
+  //      del déficit del sistema en vez de cubrir a unas sí y a otras no.
+  //   b) presencia mínima: ninguna tienda debe quedarse a stock 0 si Amigó
+  //      puede permitírselo sin bajar de su suelo, aunque esa tienda no
+  //      tenga ninguna venta este mes — no tiene sentido dejarla vacía
+  //      pudiendo evitarlo, pero tampoco compite con la venta real de b).
+  //   c) margen extra: solo si no hay escasez, y solo para tiendas que de
+  //      verdad han vendido este mes (nunca a una con venta 0, aunque su
+  //      colchón teórico sea positivo). Amigó lo persigue primero con lo
+  //      que le quede; Madrid es la única con colchón propio ("de casa",
+  //      +2) — el resto de tiendas como origen secundario solo se esfuerzan
+  //      hasta su mínimo base (venta+1), igual que Rambla/Valencia.
+  let guard = 0;
+  while (guard++ < 200) {
+    const necesitadas = normales.filter(s => sales[s] - stock[s] > 0);
+    if (!necesitadas.length) break;
+    necesitadas.sort((a, b) => (stock[a] - sales[a]) - (stock[b] - sales[b]));
+    const destino = necesitadas[0];
+    let origen = null;
+    if (destino !== 'AMIGO' && giveable.AMIGO - floorAmigoNormal() > 0) {
+      origen = 'AMIGO';
+    } else {
+      // Amigó queda fuera aquí: ya ha tenido su oportunidad "preferente"
+      // arriba con su suelo normal: dejarle reaparecer como secundario con
+      // el suelo (más permisivo) de floorOrigen le haría ceder por debajo
+      // de su propio margen protegido sin que la escasez real lo justifique.
+      const candidatos = normales
+        .filter(s => s !== destino && s !== 'AMIGO' && giveable[s] - floorOrigen(s) > 0)
+        .sort((a, b) => (stock[b] - sales[b]) - (stock[a] - sales[a]));
+      if (candidatos.length) origen = candidatos[0];
     }
-  } else {
+    if (!origen) break;
+    addMov(origen, destino, 1);
+  }
+
+  if (!escasez) {
     normales
+      .filter(s => s !== 'AMIGO' && stock[s] === 0)
+      .forEach(destino => {
+        const disponible = giveable.AMIGO - floorAmigoNormal();
+        if (disponible > 0) addMov('AMIGO', destino, 1);
+      });
+
+    normales
+      .filter(s => sales[s] > 0)
       .map(s => ({ store: s, shortage: fullNeedTarget(s) - stock[s] }))
       .filter(d => d.shortage > 0)
       .sort((a, b) => b.shortage - a.shortage)
@@ -1636,14 +1661,12 @@ function computeMovimientosParaFila(row) {
 
         // El colchón extra de Madrid (+2 en vez de +1) es "de casa": solo
         // lo persigue Amigó. El resto de tiendas como origen solo se
-        // esfuerzan por el mínimo base (ventas+1, igual que Rambla/Valencia).
+        // esfuerzan hasta el mínimo base (venta+1), igual que Rambla/Valencia.
         if (dest.store === 'MADRID') {
           falta = Math.max(0, (sales.MADRID + cfg.repoBufferRamblaValencia) - stock.MADRID);
           if (falta <= 0) return;
         }
 
-        // Se prefieren menos orígenes: se agota primero la tienda con más
-        // sobrante disponible, a ser posible cubriendo ella sola el resto.
         normales
           .filter(s => s !== 'AMIGO' && s !== dest.store)
           .map(s => ({ store: s, disponible: giveable[s] - floorOrigen(s) }))
@@ -1664,8 +1687,10 @@ function computeMovimientosParaFila(row) {
   // nunca a 0 (exige al menos 2uds para poder ceder 1). Se aplica siempre
   // al final, haya habido ya otros movimientos en la fila o no, para no
   // dejar una tienda al borde de la rotura solo porque el resto del cupo
-  // se fue a otro destino.
-  STORES.filter(s => sales[s] > 0 && stock[s] <= 1)
+  // se fue a otro destino. Solo dispara si de verdad sigue por debajo de
+  // su propia venta: si ya está en breakeven (stock===ventas) no hace
+  // falta ningún rescate aunque el número absoluto sea bajo (p.ej. 1 vs 1).
+  STORES.filter(s => sales[s] > 0 && stock[s] <= 1 && stock[s] < sales[s])
     // Por urgencia (más ventas y menos stock primero), para que si solo hay
     // origen disponible para una, no se lo quede la menos necesitada solo
     // por ir antes en el orden canónico de tiendas.
