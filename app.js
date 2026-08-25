@@ -1538,7 +1538,9 @@ function computeMovimientosParaFila(row) {
     if (falta <= 0) return;
 
     if (dest.store !== 'AMIGO') {
-      const floorAmigo = dest.extreme ? cfg.repoAmigoTop20MinStock : (sales.AMIGO + cfg.repoAmigoProtectedMargin);
+      // El mínimo nunca puede ser 0: una tienda origen no debe quedarse
+      // sin stock aunque su margen de ventas o la config lo permitan.
+      const floorAmigo = Math.max(dest.extreme ? cfg.repoAmigoTop20MinStock : (sales.AMIGO + cfg.repoAmigoProtectedMargin), 1);
       const disponible = giveable.AMIGO - floorAmigo;
       if (disponible > 0) {
         const qty = Math.min(disponible, falta);
@@ -1561,7 +1563,9 @@ function computeMovimientosParaFila(row) {
 
     STORES.filter(s => s !== 'AMIGO' && s !== dest.store).forEach(origin => {
       if (falta <= 0) return;
-      const disponible = giveable[origin] - sales[origin];
+      // Igual que con Amigó: el mínimo nunca es 0, ni siquiera cuando la
+      // tienda origen no tuvo ninguna venta el último mes.
+      const disponible = giveable[origin] - Math.max(sales[origin], 1);
       if (disponible <= 0) return;
       const qty = Math.min(disponible, falta);
       addMov(origin, dest.store, qty);
@@ -1572,13 +1576,14 @@ function computeMovimientosParaFila(row) {
   // Último recurso: si la cascada anterior no ha movido nada en absoluto
   // (escasez real de todo el sistema, nadie tiene margen que ceder), se
   // cede 1ud desde la tienda con mejor margen hacia la más urgente (más
-  // ventas y menos stock), aunque baje de su propio mínimo.
+  // ventas y menos stock), aunque baje de su propio mínimo — pero nunca
+  // dejándola a 0: exige al menos 2uds para poder ceder 1.
   if (!movimientos.length) {
     const enDeficit = STORES.filter(s => stock[s] < sales[s]);
     if (enDeficit.length) {
       enDeficit.sort((a, b) => (sales[b] - stock[b]) - (sales[a] - stock[a]));
       const destino = enDeficit[0];
-      const candidatos = STORES.filter(s => s !== destino && giveable[s] > 0)
+      const candidatos = STORES.filter(s => s !== destino && giveable[s] > 1)
         .sort((a, b) => (stock[b] - sales[b]) - (stock[a] - sales[a]));
       if (candidatos.length) addMov(candidatos[0], destino, 1);
     }
