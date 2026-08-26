@@ -42,7 +42,7 @@ function defaultState() {
     dashboard: [],           // resultado calculado del pedido actualmente abierto
     pedidos: [],             // pedidos guardados: {id, titulo, cliente, creadoEn, actualizadoEn, pedido, dashboard}
     pedidoActualId: null,    // id del pedido abierto en state.pedido/state.dashboard, o null si es un borrador sin guardar
-    repoSemanal: { rows: [], colFilters: [], onlyWithMovement: false, hideTop20: false, sortBy: null, tableZoom: 100 }, // rows: [{sku, nombre, stock:{AMIGO..}, sales:{AMIGO..}, movimientos:[{from,to,qty}], top20:{AMIGO..}}]; sortBy: {key, dir} | null; tableZoom: % de zoom de la tabla de revisión
+    repoSemanal: { rows: [], colFilters: [], onlyWithMovement: false, hideTop20: false, sortBy: null, tableZoom: 100, hideRevisadas: false }, // rows: [{sku, nombre, stock:{AMIGO..}, sales:{AMIGO..}, movimientos:[{from,to,qty}], top20:{AMIGO..}, revisado}]; sortBy: {key, dir} | null; tableZoom: % de zoom de la tabla de revisión
   };
 }
 
@@ -81,6 +81,7 @@ function mergeIntoDefault(parsed) {
   if (typeof merged.repoSemanal.hideTop20 !== 'boolean') merged.repoSemanal.hideTop20 = false;
   if (merged.repoSemanal.sortBy === undefined) merged.repoSemanal.sortBy = null;
   if (typeof merged.repoSemanal.tableZoom !== 'number' || isNaN(merged.repoSemanal.tableZoom)) merged.repoSemanal.tableZoom = 100;
+  if (typeof merged.repoSemanal.hideRevisadas !== 'boolean') merged.repoSemanal.hideRevisadas = false;
   merged.repoSemanal.rows.forEach(r => {
     if (!r.stock) r.stock = {};
     if (!r.sales) r.sales = {};
@@ -88,6 +89,7 @@ function mergeIntoDefault(parsed) {
     if (!Array.isArray(r.movimientos)) r.movimientos = [];
     if (!r.top20) r.top20 = {};
     STORES.forEach(s => { if (r.top20[s] === undefined) r.top20[s] = false; });
+    if (typeof r.revisado !== 'boolean') r.revisado = false;
   });
   return merged;
 }
@@ -1466,7 +1468,7 @@ document.getElementById('inputRepoReport').addEventListener('change', async (e) 
       if (isExcludedFromRepoImport(sku)) { skippedExcluded++; return; }
       let entry = bySku[sku];
       if (!entry) {
-        entry = { sku, nombre: nombreRaw, stock: {}, sales: {}, movimientos: [], top20: {} };
+        entry = { sku, nombre: nombreRaw, stock: {}, sales: {}, movimientos: [], top20: {}, revisado: false };
         STORES.forEach(s => { entry.stock[s] = 0; entry.sales[s] = 0; entry.top20[s] = false; });
         bySku[sku] = entry;
         fresh.push(entry);
@@ -1819,6 +1821,7 @@ function setMovQtyForPair(row, from, to, qty) {
 function repoSortValue(row, key) {
   if (key === 'nombre') return (row.nombre || '').toLowerCase();
   if (key === 'sku') return row.sku || '';
+  if (key === 'revisado') return row.revisado ? 1 : 0;
   if (key.startsWith('top20_')) return (row.top20 && row.top20[key.slice(6)]) ? 1 : 0;
   if (key.startsWith('sales_')) return row.sales[key.slice(6)] || 0;
   if (key.startsWith('stock_')) return row.stock[key.slice(6)] || 0;
@@ -1862,7 +1865,7 @@ function repoTableHeadHtml(pinnedStore) {
     return `<th class="movCol${active ? ' colFilterActive' : ''}">${sortLabelHtml('mov_' + key, `${STORE_ABBR[f]}→${STORE_ABBR[t]}`)}
       <button type="button" class="colFilterBtn${active ? ' active' : ''}" data-pair="${key}" title="Ver solo filas con movimiento en ${STORE_ABBR[f]}→${STORE_ABBR[t]}">▾ filtrar</button></th>`;
   }).join('');
-  return `<tr><th>${sortLabelHtml('nombre', 'Producto')}</th><th>${sortLabelHtml('sku', 'SKU')}</th>${pinnedTh}${top20Th}${stockSalesTh}${movTh}</tr>`;
+  return `<tr><th>${sortLabelHtml('nombre', 'Producto')}</th><th>${sortLabelHtml('sku', 'SKU')}</th>${pinnedTh}${top20Th}${stockSalesTh}${movTh}<th>${sortLabelHtml('revisado', 'Revisado')}</th></tr>`;
 }
 
 // Las 6 columnas de traspaso (3 salidas + 3 entradas) que tocan a una tienda,
@@ -1952,6 +1955,8 @@ function renderRepoTableInner() {
   if (onlyMovEl) onlyMovEl.checked = !!state.repoSemanal.onlyWithMovement;
   const hideTop20El = document.getElementById('repoHideTop20');
   if (hideTop20El) hideTop20El.checked = !!state.repoSemanal.hideTop20;
+  const hideRevisadasEl = document.getElementById('repoHideRevisadas');
+  if (hideRevisadasEl) hideRevisadasEl.checked = !!state.repoSemanal.hideRevisadas;
   const zoomEl = document.getElementById('repoTableZoom');
   if (zoomEl) zoomEl.value = String(state.repoSemanal.tableZoom || 100);
   applyRepoTableZoom();
@@ -1965,6 +1970,9 @@ function renderRepoTableInner() {
   );
   if (state.repoSemanal.onlyWithMovement) {
     rows = rows.filter(r => (r.movimientos || []).some(m => m.qty > 0));
+  }
+  if (state.repoSemanal.hideRevisadas) {
+    rows = rows.filter(r => !r.revisado);
   }
   if (activeFilters.length) {
     rows = rows.filter(r => activeFilters.some(key => {
@@ -1997,7 +2005,7 @@ function renderRepoTableInner() {
     // desapercibidas al revisar la fila. Si además una cantidad supera el
     // stock disponible en la tienda de origen, se marca como aviso (tiene
     // prioridad visual sobre el resaltado de "múltiples traspasos").
-    const activeMovCount = (row.movimientos || []).filter(m => m.qty > 0).length;
+    const activeMovCount = repoActiveMovCount(row);
     const movTd = MOVEMENT_ORDER.map(([f, t]) => {
       const qty = movQtyForPair(row, f, t);
       const exceedsStock = qty > 0 && qty > (row.stock[f] || 0);
@@ -2015,7 +2023,9 @@ function renderRepoTableInner() {
     // más complejo de revisar a ojo (varios orígenes y/o destinos a la
     // vez) — se resalta el nombre para empezar la revisión por ahí.
     const nombreCls = activeMovCount >= 3 ? ' class="repo-strong-debate"' : '';
-    tr.innerHTML = `<td${nombreCls}>${row.nombre}</td><td>${row.sku}</td>${pinnedTd}${top20Td}${stockSalesTd}${movTd}`;
+    const revisadoTd = `<td class="revisado-col"><input type="checkbox" class="revisadoCheckbox" data-sku="${row.sku}"${row.revisado ? ' checked' : ''} title="Marcar esta referencia como revisada"></td>`;
+    if (row.revisado) tr.classList.add('row-revisada');
+    tr.innerHTML = `<td${nombreCls}>${row.nombre}</td><td>${row.sku}</td>${pinnedTd}${top20Td}${stockSalesTd}${movTd}${revisadoTd}`;
     tbody.appendChild(tr);
   });
 
@@ -2024,6 +2034,15 @@ function renderRepoTableInner() {
       const row = state.repoSemanal.rows.find(r => r.sku === e.target.dataset.sku);
       const v = Math.max(0, parseInt(e.target.value, 10) || 0);
       setMovQtyForPair(row, e.target.dataset.from, e.target.dataset.to, v);
+      saveState();
+      renderRepoTable();
+    });
+  });
+
+  tbody.querySelectorAll('.revisadoCheckbox').forEach(chk => {
+    chk.addEventListener('change', (e) => {
+      const row = state.repoSemanal.rows.find(r => r.sku === e.target.dataset.sku);
+      row.revisado = e.target.checked;
       saveState();
       renderRepoTable();
     });
@@ -2103,6 +2122,11 @@ document.getElementById('repoHideTop20').addEventListener('change', (e) => {
   saveState();
   renderRepoTable();
 });
+document.getElementById('repoHideRevisadas').addEventListener('change', (e) => {
+  state.repoSemanal.hideRevisadas = e.target.checked;
+  saveState();
+  renderRepoTable();
+});
 // Zoom porcentual de la tabla de revisión (monitor vs. portátil). Se aplica
 // con la propiedad CSS "zoom" sobre la caja de scroll, en vez de transform,
 // para que el navegador recalcule el layout (y por tanto el propio ancho/
@@ -2117,6 +2141,13 @@ function applyRepoTableZoom() {
   if (!box) return;
   box.style.zoom = (state.repoSemanal.tableZoom || 100) + '%';
   adjustRepoTableScrollHeight();
+}
+
+// Nº de traspasos simultáneos (qty>0) de una fila — mismo criterio que el
+// resaltado en naranja de la celda (multi-mov, >1) y en rojo del nombre
+// (repo-strong-debate, >=3) al pintar la tabla.
+function repoActiveMovCount(row) {
+  return (row.movimientos || []).filter(m => m.qty > 0).length;
 }
 
 function renderRepoSummary() {
@@ -2137,9 +2168,14 @@ function renderRepoSummary() {
     const v = totals[f + '>' + t] || 0;
     return v > 0 ? `<div class="chip">${STORE_ABBR[f]} → ${STORE_ABBR[t]}<b>${v}</b></div>` : '';
   }).join('');
+  const totalRows = state.repoSemanal.rows.length;
+  const revisadas = state.repoSemanal.rows.filter(r => r.revisado).length;
+  const debateFuertePendiente = state.repoSemanal.rows.filter(r => !r.revisado && repoActiveMovCount(r) >= 3).length;
   el.innerHTML = `<div class="store-summary">
     <div class="chip">Movimientos (líneas)<b>${totalLineas}</b></div>
     <div class="chip">Unidades totales<b>${totalUnidades}</b></div>
+    <div class="chip">Revisadas<b>${revisadas} / ${totalRows}</b></div>
+    <div class="chip${debateFuertePendiente > 0 ? ' chip-warn' : ''}">Debate fuerte pendiente<b>${debateFuertePendiente}</b></div>
     ${chips}
   </div>`;
 }
