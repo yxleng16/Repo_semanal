@@ -2180,7 +2180,12 @@ function renderRepoSummary() {
   </div>`;
 }
 
-document.getElementById('btnGenerarCSVsRepo').addEventListener('click', () => {
+// Genera los enlaces de descarga de CSV por pareja de tiendas (uno por
+// origen→destino con movimiento). Si autoDescargar es true, además dispara
+// la descarga de cada uno automáticamente (con un pequeño margen entre
+// cada clic, para que el navegador no las bloquee como "descargas
+// múltiples" al lanzarlas todas en el mismo instante).
+function generarCSVsPorPareja(autoDescargar) {
   const byPair = {};
   MOVEMENT_ORDER.forEach(([f, t]) => { byPair[f + '>' + t] = {}; });
   state.repoSemanal.rows.forEach(row => {
@@ -2195,6 +2200,7 @@ document.getElementById('btnGenerarCSVsRepo').addEventListener('click', () => {
   const container = document.getElementById('downloadLinksRepo');
   container.innerHTML = '';
   let any = false;
+  let delay = 0;
   MOVEMENT_ORDER.forEach(([f, t]) => {
     const entries = Object.entries(byPair[f + '>' + t]);
     if (!entries.length) return;
@@ -2204,8 +2210,20 @@ document.getElementById('btnGenerarCSVsRepo').addEventListener('click', () => {
     const a = downloadCSV(filename, ['SKU', 'QUANTITY'], rowsOut);
     a.textContent = `${STORE_ABBR[f]} → ${STORE_ABBR[t]} (${entries.length} refs)`;
     container.appendChild(a);
+    if (autoDescargar) {
+      setTimeout(() => a.click(), delay);
+      delay += 200;
+    }
   });
   if (!any) toast('No hay traspasos para generar CSVs.');
+  return any;
+}
+
+document.getElementById('btnGenerarCSVsRepo').addEventListener('click', () => {
+  generarCSVsPorPareja(false);
+});
+document.getElementById('btnDescargarTodosRepo').addEventListener('click', () => {
+  generarCSVsPorPareja(true);
 });
 
 // CSV único con todos los traspasos juntos (una fila por SKU+origen+destino),
