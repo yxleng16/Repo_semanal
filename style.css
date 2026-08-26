@@ -118,6 +118,7 @@ tbody tr:hover{background:var(--bg);}
   background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:12px;
 }
 .store-summary .chip b{display:block;font-size:16px;}
+.store-summary .chip.chip-warn{background:var(--danger-bg);border-color:var(--danger);color:var(--danger);}
 
 .download-links{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;}
 .download-links a{
@@ -236,6 +237,12 @@ th.colFilterActive{background:#dbeafe;color:var(--text);}
 
 /* Oculta las 4 columnas Top20 (checkbox "Ocultar columnas Top20") */
 #tableRepo.hide-top20 .top20-col{ display:none; }
+
+/* Columna "Revisado" (checkbox manual) y atenuado de fila ya revisada, para
+   poder retomar la revisión donde se dejó sin perder de vista lo pendiente. */
+#tableRepo td.revisado-col{ text-align:center; }
+#tableRepo tbody tr.row-revisada > td:not(.repo-strong-debate){ opacity:.55; }
+#tableRepo tbody tr.row-revisada > td.repo-strong-debate{ opacity:.75; }
 
 .toast{
   position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);
