@@ -1696,6 +1696,31 @@ function computeMovimientosParaFila(row) {
             falta -= qty;
           });
       });
+
+    // d) Aprovechar sobrante: solo para una tienda que ha empezado la
+    // semana a stock 0 (rotura real, con venta del último mes posiblemente
+    // artificial por esa misma rotura) y con producto no accesorio (mismo
+    // criterio que excluye accesorios del Top20 — no interesa
+    // sobre-abastecerlos especulativamente). Si a Amigó le sigue quedando
+    // mucho stock por encima de lo que ya cubre el objetivo normal, se
+    // reparte ese sobrante de 1 en 1 hasta igualar niveles de stock. No es
+    // una necesidad urgente, es "ya que sobra, lo reparto un poco" — se
+    // revisa la semana siguiente según cómo evolucione la venta. No se
+    // aplica a una tienda que ya arrancaba con stock propio: ahí no hay
+    // rotura real ni duda sobre el dato de venta, así que no hace falta
+    // sobre-abastecerla solo porque a Amigó le sobre.
+    if (isRealProductForTop20(row)) {
+      const candidatosSobrante = normales.filter(s => s !== 'AMIGO' && sales[s] > 0 && (row.stock[s] || 0) === 0);
+      let guardSobrante = 0;
+      while (guardSobrante++ < 200) {
+        if (giveable.AMIGO - floorAmigoNormal() <= 0) break;
+        const peor = candidatosSobrante
+          .filter(s => stock[s] < stock.AMIGO)
+          .sort((a, b) => stock[a] - stock[b])[0];
+        if (!peor) break;
+        addMov('AMIGO', peor, 1);
+      }
+    }
   }
 
   // 3) Rescate de emergencia: cualquier tienda con ventas>0 que se haya
