@@ -198,6 +198,17 @@ th.colFilterActive{background:#dbeafe;color:var(--text);}
 #tableRepo thead th:nth-child(1), #tableRepo thead th:nth-child(2){ z-index:4; }
 #tableRepo tbody tr:hover td:nth-child(1), #tableRepo tbody tr:hover td:nth-child(2){ background:var(--bg); }
 
+/* Nombre de producto resaltado cuando la fila tiene 3+ traspasos
+   simultáneos (reparto complejo, con varios orígenes y/o destinos a la
+   vez) — para poder empezar la revisión manual por esas referencias. Solo
+   borde+color, sin tocar el fondo, para no chocar con el sticky/hover/
+   selección de celda de esa misma columna. */
+#tableRepo td.repo-strong-debate{
+  border-left:4px solid var(--danger);
+  color:var(--danger);
+  font-weight:700;
+}
+
 /* Al filtrar por una tienda concreta (chip AMI/MAD/RAM/VLC), sus columnas de
    venta y stock se sacan del bloque normal (ver getPinnedStore en app.js) y
    se fijan justo detrás de Producto/SKU, para poder comprobar ese dato sin

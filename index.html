@@ -195,12 +195,22 @@
         <h3>Traspasos por SKU</h3>
         <input type="search" id="repoFilter" placeholder="Filtrar por SKU o nombre...">
       </div>
-      <p class="hint">Las columnas Top20 muestran si la referencia está entre las 20 más vendidas del último mes en esa tienda (excluyendo gift cards, envoltorios/regalo y accesorios — configurable en "Reglas / Config"). Cada columna de traspaso es editable directamente; pulsa "▾ filtrar" en su cabecera para ver solo las filas con movimiento en esa columna, o usa los atajos de aquí abajo. Pulsa el nombre de cualquier cabecera para ordenar la tabla por esa columna. Las cantidades se resaltan en naranja cuando esa misma referencia tiene más de un traspaso a la vez, y en rojo cuando la cantidad supera el stock disponible en la tienda de origen. Producto y SKU quedan fijos al desplazar la tabla en horizontal, y si filtras por una tienda con los atajos AMI/MAD/RAM/VLC también se fijan sus columnas de venta y stock. Pulsa cualquier celda para resaltar su fila y su columna y comprobar un dato más fácil.</p>
+      <p class="hint">Las columnas Top20 muestran si la referencia está entre las 20 más vendidas del último mes en esa tienda (excluyendo gift cards, envoltorios/regalo y accesorios — configurable en "Reglas / Config"). Cada columna de traspaso es editable directamente; pulsa "▾ filtrar" en su cabecera para ver solo las filas con movimiento en esa columna, o usa los atajos de aquí abajo. Pulsa el nombre de cualquier cabecera para ordenar la tabla por esa columna. Las cantidades se resaltan en naranja cuando esa misma referencia tiene más de un traspaso a la vez, y en rojo cuando la cantidad supera el stock disponible en la tienda de origen. El nombre del producto se resalta en rojo cuando tiene 3 o más traspasos simultáneos, para empezar la revisión manual por ahí. Producto y SKU quedan fijos al desplazar la tabla en horizontal, y si filtras por una tienda con los atajos AMI/MAD/RAM/VLC también se fijan sus columnas de stock y venta. Pulsa cualquier celda para resaltar su fila y su columna y comprobar un dato más fácil. El control de tamaño ajusta el zoom de la tabla según trabajes desde monitor o portátil.</p>
       <div class="repo-filter-toolbar">
         <label class="checkbox-label"><input type="checkbox" id="repoOnlyWithMov"> Mostrar solo filas con algún traspaso</label>
         <label class="checkbox-label"><input type="checkbox" id="repoHideTop20"> Ocultar columnas Top20</label>
         <span class="muted">Traspasos de/hacia:</span>
         <div class="store-chip-group" id="repoStoreChips"></div>
+        <label class="checkbox-label">Tamaño tabla
+          <select id="repoTableZoom">
+            <option value="75">75%</option>
+            <option value="90">90%</option>
+            <option value="100" selected>100%</option>
+            <option value="110">110%</option>
+            <option value="125">125%</option>
+            <option value="150">150%</option>
+          </select>
+        </label>
       </div>
       <div id="repoColFilterInfo" class="inline-fields"></div>
       <div class="table-scroll"><table id="tableRepo"><thead><tr></tr></thead><tbody></tbody></table></div>
@@ -212,6 +222,8 @@
     <div class="card">
       <button id="btnGenerarCSVsRepo" class="btn-primary">Generar CSVs de traspaso (AMI/MAD/RAM/VLC)</button>
       <div id="downloadLinksRepo" class="download-links"></div>
+      <button id="btnGenerarCSVUnicoRepo" class="btn-primary">Generar CSV único (todos los traspasos juntos)</button>
+      <div id="downloadLinksRepoUnico" class="download-links"></div>
     </div>
   </section>
 
@@ -268,6 +280,12 @@
       </label>
       <label>Repo semanal: prefijos de SKU a omitir del import (separados por coma)
         <input type="text" id="cfgRepoImportExcludeSkuPrefixes" value="GIFT">
+      </label>
+      <label>Repo semanal: prefijos de SKU de accesorios, sin traspaso entre tiendas (separados por coma)
+        <input type="text" id="cfgRepoAccessorySkuPrefixes" value="ACC">
+      </label>
+      <label>Repo semanal: palabras del nombre de accesorios, sin traspaso entre tiendas (separadas por coma)
+        <input type="text" id="cfgRepoAccessoryKeywords" value="accesorio">
       </label>
       <label>Top20: palabras del nombre a excluir (separadas por coma)
         <input type="text" id="cfgTop20ExcludeKeywords" value="gift card,tarjeta regalo,envoltorio,papel de regalo,bolsa de regalo,accesorio,gift wrap">

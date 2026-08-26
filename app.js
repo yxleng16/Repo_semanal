@@ -22,6 +22,11 @@ function defaultState() {
       // SKUs que no participan en absoluto en la repo semanal (se omiten al
       // importar, como los Wholesale) — p.ej. "GIFT" del envoltorio de regalo.
       repoImportExcludeSkuPrefixes: ['GIFT'],
+      // Los accesorios sí se importan y se ven en la tabla (a diferencia de
+      // repoImportExcludeSkuPrefixes), pero nunca reciben traspaso sugerido:
+      // se reponen por un proceso totalmente distinto, fuera de esta app.
+      repoAccessorySkuPrefixes: ['ACC'],
+      repoAccessoryKeywords: ['accesorio'],
       // Reglas de traspaso de la repo semanal (ver computeMovimientosParaFila).
       repoBufferMadrid: 2,
       repoBufferRamblaValencia: 1,
@@ -37,7 +42,7 @@ function defaultState() {
     dashboard: [],           // resultado calculado del pedido actualmente abierto
     pedidos: [],             // pedidos guardados: {id, titulo, cliente, creadoEn, actualizadoEn, pedido, dashboard}
     pedidoActualId: null,    // id del pedido abierto en state.pedido/state.dashboard, o null si es un borrador sin guardar
-    repoSemanal: { rows: [], colFilters: [], onlyWithMovement: false, hideTop20: false, sortBy: null }, // rows: [{sku, nombre, stock:{AMIGO..}, sales:{AMIGO..}, movimientos:[{from,to,qty}], top20:{AMIGO..}}]; sortBy: {key, dir} | null
+    repoSemanal: { rows: [], colFilters: [], onlyWithMovement: false, hideTop20: false, sortBy: null, tableZoom: 100 }, // rows: [{sku, nombre, stock:{AMIGO..}, sales:{AMIGO..}, movimientos:[{from,to,qty}], top20:{AMIGO..}}]; sortBy: {key, dir} | null; tableZoom: % de zoom de la tabla de revisión
   };
 }
 
@@ -55,6 +60,8 @@ function mergeIntoDefault(parsed) {
   if (!Array.isArray(merged.config.top20ExcludePrefixes)) merged.config.top20ExcludePrefixes = def.config.top20ExcludePrefixes;
   if (!Array.isArray(merged.config.repoImportExcludeSkuPrefixes)) merged.config.repoImportExcludeSkuPrefixes = def.config.repoImportExcludeSkuPrefixes;
   if (!Array.isArray(merged.config.top20ExcludeKeywords)) merged.config.top20ExcludeKeywords = def.config.top20ExcludeKeywords;
+  if (!Array.isArray(merged.config.repoAccessorySkuPrefixes)) merged.config.repoAccessorySkuPrefixes = def.config.repoAccessorySkuPrefixes;
+  if (!Array.isArray(merged.config.repoAccessoryKeywords)) merged.config.repoAccessoryKeywords = def.config.repoAccessoryKeywords;
   ['repoBufferMadrid', 'repoBufferRamblaValencia', 'repoAmigoProtectedMargin', 'repoAmigoTop20MinStock'].forEach(k => {
     if (typeof merged.config[k] !== 'number' || isNaN(merged.config[k])) merged.config[k] = def.config[k];
   });
@@ -73,6 +80,7 @@ function mergeIntoDefault(parsed) {
   if (typeof merged.repoSemanal.onlyWithMovement !== 'boolean') merged.repoSemanal.onlyWithMovement = false;
   if (typeof merged.repoSemanal.hideTop20 !== 'boolean') merged.repoSemanal.hideTop20 = false;
   if (merged.repoSemanal.sortBy === undefined) merged.repoSemanal.sortBy = null;
+  if (typeof merged.repoSemanal.tableZoom !== 'number' || isNaN(merged.repoSemanal.tableZoom)) merged.repoSemanal.tableZoom = 100;
   merged.repoSemanal.rows.forEach(r => {
     if (!r.stock) r.stock = {};
     if (!r.sales) r.sales = {};
@@ -1388,6 +1396,20 @@ function isExcludedFromRepoImport(sku) {
   return prefixes.some(p => p && skuUp.startsWith(p.toUpperCase()));
 }
 
+// Los accesorios se reponen por un proceso totalmente distinto al de la
+// repo semanal entre tiendas físicas — se siguen importando y viendo en la
+// tabla (a diferencia de isExcludedFromRepoImport), pero nunca reciben
+// ningún traspaso sugerido (ver computeMovimientosParaFila).
+function isAccessoryRow(row) {
+  const sku = (row.sku || '').toUpperCase();
+  const nombre = (row.nombre || '').toUpperCase();
+  const prefixes = state.config.repoAccessorySkuPrefixes || [];
+  const keywords = state.config.repoAccessoryKeywords || [];
+  if (prefixes.some(p => p && sku.startsWith(p.toUpperCase()))) return true;
+  if (keywords.some(k => k && nombre.includes(k.toUpperCase()))) return true;
+  return false;
+}
+
 // Excluye del cálculo del Top20 las referencias que no son un producto real
 // en venta (gift cards, envoltorios/opciones de regalo, accesorios...),
 // según los prefijos de SKU y palabras clave de nombre configurados.
@@ -1524,6 +1546,9 @@ function consolidarCadenasIntermedias(movimientos) {
 }
 
 function computeMovimientosParaFila(row) {
+  // Los accesorios se reponen por un proceso totalmente distinto: nunca se
+  // les prevé ningún traspaso entre tiendas físicas.
+  if (isAccessoryRow(row)) return [];
   const cfg = state.config;
   // stock: cuánto tiene cada tienda "ahora mismo" en esta pasada (sube al
   // recibir un traspaso, baja al enviar uno) — se usa para saber cuánto le
@@ -1699,16 +1724,16 @@ function computeMovimientosParaFila(row) {
 
     // d) Aprovechar sobrante: solo para una tienda que ha empezado la
     // semana a stock 0 (rotura real, con venta del último mes posiblemente
-    // artificial por esa misma rotura) y con producto no accesorio (mismo
-    // criterio que excluye accesorios del Top20 — no interesa
-    // sobre-abastecerlos especulativamente). Si a Amigó le sigue quedando
-    // mucho stock por encima de lo que ya cubre el objetivo normal, se
-    // reparte ese sobrante de 1 en 1 hasta igualar niveles de stock. No es
-    // una necesidad urgente, es "ya que sobra, lo reparto un poco" — se
-    // revisa la semana siguiente según cómo evolucione la venta. No se
-    // aplica a una tienda que ya arrancaba con stock propio: ahí no hay
-    // rotura real ni duda sobre el dato de venta, así que no hace falta
-    // sobre-abastecerla solo porque a Amigó le sobre.
+    // artificial por esa misma rotura). Los accesorios ya han salido antes
+    // (isAccessoryRow, arriba del todo — ni siquiera llegan aquí); esta
+    // comprobación cubre además gift cards/envoltorios de regalo, donde
+    // tampoco interesa sobre-abastecer especulativamente. Si a Amigó le
+    // sigue quedando mucho stock por encima de lo que ya cubre el objetivo
+    // normal, se reparte ese sobrante de 1 en 1 hasta igualar niveles de
+    // stock. No es una necesidad urgente, es "ya que sobra, lo reparto un
+    // poco" — se revisa la semana siguiente según cómo evolucione la venta.
+    // No se aplica a una tienda que ya arrancaba con stock propio: ahí no
+    // hay rotura real ni duda sobre el dato de venta.
     if (isRealProductForTop20(row)) {
       const candidatosSobrante = normales.filter(s => s !== 'AMIGO' && sales[s] > 0 && (row.stock[s] || 0) === 0);
       let guardSobrante = 0;
@@ -1818,16 +1843,17 @@ function sortLabelHtml(key, label) {
 // el filtro "solo filas con movimiento en esta columna" (varias a la vez se
 // combinan con OR, como pedía revisar cada traspaso por separado).
 // Cabecera de la tabla. Si se pasa pinnedStore, sus dos columnas de datos
-// (ventas y stock) se sacan del bloque normal y se colocan justo detrás de
-// Producto/SKU, para poder fijarlas junto a ellas al filtrar por esa tienda.
+// (stock y ventas, en ese orden) se sacan del bloque normal y se colocan
+// justo detrás de Producto/SKU, para poder fijarlas junto a ellas al
+// filtrar por esa tienda.
 function repoTableHeadHtml(pinnedStore) {
   const pinnedTh = pinnedStore
-    ? `<th class="pinned-col-1">${sortLabelHtml('sales_' + pinnedStore, `Ventas 1m ${STORE_ABBR[pinnedStore]}`)}</th>` +
-      `<th class="pinned-col-2">${sortLabelHtml('stock_' + pinnedStore, `Stock ${STORE_ABBR[pinnedStore]}`)}</th>`
+    ? `<th class="pinned-col-1">${sortLabelHtml('stock_' + pinnedStore, `Stock ${STORE_ABBR[pinnedStore]}`)}</th>` +
+      `<th class="pinned-col-2">${sortLabelHtml('sales_' + pinnedStore, `Ventas 1m ${STORE_ABBR[pinnedStore]}`)}</th>`
     : '';
   const top20Th = STORES.map(s => `<th class="top20-col">${sortLabelHtml('top20_' + s, `Top20 ${STORE_ABBR[s]}`)}</th>`).join('');
   const stockSalesTh = STORES.filter(s => s !== pinnedStore).map(s =>
-    `<th>${sortLabelHtml('sales_' + s, `Ventas 1m ${STORE_ABBR[s]}`)}</th><th>${sortLabelHtml('stock_' + s, `Stock ${STORE_ABBR[s]}`)}</th>`
+    `<th>${sortLabelHtml('stock_' + s, `Stock ${STORE_ABBR[s]}`)}</th><th>${sortLabelHtml('sales_' + s, `Ventas 1m ${STORE_ABBR[s]}`)}</th>`
   ).join('');
   const activeFilters = state.repoSemanal.colFilters || [];
   const movTh = MOVEMENT_ORDER.map(([f, t]) => {
@@ -1926,6 +1952,9 @@ function renderRepoTableInner() {
   if (onlyMovEl) onlyMovEl.checked = !!state.repoSemanal.onlyWithMovement;
   const hideTop20El = document.getElementById('repoHideTop20');
   if (hideTop20El) hideTop20El.checked = !!state.repoSemanal.hideTop20;
+  const zoomEl = document.getElementById('repoTableZoom');
+  if (zoomEl) zoomEl.value = String(state.repoSemanal.tableZoom || 100);
+  applyRepoTableZoom();
 
   const tbody = document.querySelector('#tableRepo tbody');
   tbody.innerHTML = '';
@@ -1959,10 +1988,10 @@ function renderRepoTableInner() {
   sortedRows.forEach((row) => {
     const tr = document.createElement('tr');
     const pinnedTd = pinnedStore
-      ? `<td class="pinned-col-1">${row.sales[pinnedStore] || 0}</td><td class="pinned-col-2">${row.stock[pinnedStore] || 0}</td>`
+      ? `<td class="pinned-col-1">${row.stock[pinnedStore] || 0}</td><td class="pinned-col-2">${row.sales[pinnedStore] || 0}</td>`
       : '';
     const top20Td = STORES.map(s => `<td class="top20-col ${row.top20 && row.top20[s] ? 'top20-yes' : 'top20-no'}">${row.top20 && row.top20[s] ? 'SI' : 'NO'}</td>`).join('');
-    const stockSalesTd = STORES.filter(s => s !== pinnedStore).map(s => `<td>${row.sales[s] || 0}</td><td>${row.stock[s] || 0}</td>`).join('');
+    const stockSalesTd = STORES.filter(s => s !== pinnedStore).map(s => `<td>${row.stock[s] || 0}</td><td>${row.sales[s] || 0}</td>`).join('');
     // Si un mismo SKU tiene más de un traspaso a la vez (p. ej. recibe de una
     // tienda y envía a otra), se resaltan sus cantidades para que no pasen
     // desapercibidas al revisar la fila. Si además una cantidad supera el
@@ -1982,7 +2011,11 @@ function renderRepoTableInner() {
       }
       return `<td><input type="number" min="0" value="${qty}" class="movPairInput${cls}" data-sku="${row.sku}" data-from="${f}" data-to="${t}"${title}></td>`;
     }).join('');
-    tr.innerHTML = `<td>${row.nombre}</td><td>${row.sku}</td>${pinnedTd}${top20Td}${stockSalesTd}${movTd}`;
+    // 3 o más traspasos simultáneos en la misma referencia son el reparto
+    // más complejo de revisar a ojo (varios orígenes y/o destinos a la
+    // vez) — se resalta el nombre para empezar la revisión por ahí.
+    const nombreCls = activeMovCount >= 3 ? ' class="repo-strong-debate"' : '';
+    tr.innerHTML = `<td${nombreCls}>${row.nombre}</td><td>${row.sku}</td>${pinnedTd}${top20Td}${stockSalesTd}${movTd}`;
     tbody.appendChild(tr);
   });
 
@@ -2070,6 +2103,21 @@ document.getElementById('repoHideTop20').addEventListener('change', (e) => {
   saveState();
   renderRepoTable();
 });
+// Zoom porcentual de la tabla de revisión (monitor vs. portátil). Se aplica
+// con la propiedad CSS "zoom" sobre la caja de scroll, en vez de transform,
+// para que el navegador recalcule el layout (y por tanto el propio ancho/
+// alto scrollable) al tamaño nuevo en vez de solo escalar visualmente.
+document.getElementById('repoTableZoom').addEventListener('change', (e) => {
+  state.repoSemanal.tableZoom = parseInt(e.target.value, 10) || 100;
+  saveState();
+  applyRepoTableZoom();
+});
+function applyRepoTableZoom() {
+  const box = document.querySelector('#tab-traspasos .table-scroll');
+  if (!box) return;
+  box.style.zoom = (state.repoSemanal.tableZoom || 100) + '%';
+  adjustRepoTableScrollHeight();
+}
 
 function renderRepoSummary() {
   const el = document.getElementById('repoSummary');
@@ -2122,6 +2170,25 @@ document.getElementById('btnGenerarCSVsRepo').addEventListener('click', () => {
     container.appendChild(a);
   });
   if (!any) toast('No hay traspasos para generar CSVs.');
+});
+
+// CSV único con todos los traspasos juntos (una fila por SKU+origen+destino),
+// como alternativa a los CSV separados por pareja de tiendas de arriba.
+document.getElementById('btnGenerarCSVUnicoRepo').addEventListener('click', () => {
+  const rowsOut = [];
+  state.repoSemanal.rows.forEach(row => {
+    (row.movimientos || []).forEach(m => {
+      if (m.qty <= 0) return;
+      rowsOut.push([row.sku, m.from, m.to, m.qty]);
+    });
+  });
+  const container = document.getElementById('downloadLinksRepoUnico');
+  container.innerHTML = '';
+  if (!rowsOut.length) { toast('No hay traspasos para generar el CSV.'); return; }
+  const filename = `repo_traspasos_${todayStr()}.csv`;
+  const a = downloadCSV(filename, ['SKU', 'ORIGEN', 'DESTINO', 'QUANTITY'], rowsOut);
+  a.textContent = `Todos los traspasos (${rowsOut.length} líneas)`;
+  container.appendChild(a);
 });
 
 /* ============ Factura ============ */
@@ -2251,6 +2318,8 @@ function loadConfigForm() {
   document.getElementById('cfgTop20ExcludePrefixes').value = state.config.top20ExcludePrefixes.join(',');
   document.getElementById('cfgTop20ExcludeKeywords').value = state.config.top20ExcludeKeywords.join(',');
   document.getElementById('cfgRepoImportExcludeSkuPrefixes').value = state.config.repoImportExcludeSkuPrefixes.join(',');
+  document.getElementById('cfgRepoAccessorySkuPrefixes').value = state.config.repoAccessorySkuPrefixes.join(',');
+  document.getElementById('cfgRepoAccessoryKeywords').value = state.config.repoAccessoryKeywords.join(',');
   document.getElementById('cfgRepoBufferMadrid').value = state.config.repoBufferMadrid;
   document.getElementById('cfgRepoBufferRamblaValencia').value = state.config.repoBufferRamblaValencia;
   document.getElementById('cfgRepoAmigoProtectedMargin').value = state.config.repoAmigoProtectedMargin;
@@ -2283,6 +2352,9 @@ document.getElementById('btnSaveConfig').addEventListener('click', () => {
   state.config.top20ExcludeKeywords = document.getElementById('cfgTop20ExcludeKeywords').value
     .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
   state.config.repoImportExcludeSkuPrefixes = splitAliasList(document.getElementById('cfgRepoImportExcludeSkuPrefixes').value);
+  state.config.repoAccessorySkuPrefixes = splitAliasList(document.getElementById('cfgRepoAccessorySkuPrefixes').value);
+  state.config.repoAccessoryKeywords = document.getElementById('cfgRepoAccessoryKeywords').value
+    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
   state.config.repoBufferMadrid = parseInt(document.getElementById('cfgRepoBufferMadrid').value, 10) || 0;
   state.config.repoBufferRamblaValencia = parseInt(document.getElementById('cfgRepoBufferRamblaValencia').value, 10) || 0;
   state.config.repoAmigoProtectedMargin = parseInt(document.getElementById('cfgRepoAmigoProtectedMargin').value, 10) || 0;
