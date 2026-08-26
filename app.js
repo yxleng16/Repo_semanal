@@ -1577,21 +1577,38 @@ function computeMovimientosParaFila(row) {
     .filter(d => d.shortage > 0)
     .sort((a, b) => b.shortage - a.shortage);
 
-  // 1) Casos extremos (top20 del destino) primero — Amigó se permite bajar
-  // mucho más (reserva mínima absoluta). Si el propio Amigó también tiene
-  // este SKU en su top20, protege esa reserva mínima igual que siempre. Si
-  // no, no hay motivo para retenerle más que su suelo normal (venta+margen)
-  // solo para proteger un SKU que ni siquiera vende — usa el que sea más
-  // permisivo de los dos suelos, nunca el más restrictivo de ambos.
-  destinos.filter(d => extreme[d.store]).forEach(dest => {
-    if (dest.store === 'AMIGO') return; // Amigó no se traspasa a sí mismo.
-    const falta = fullNeedTarget(dest.store) - stock[dest.store];
-    if (falta <= 0) return;
-    const floorTop20 = Math.max(cfg.repoAmigoTop20MinStock, 1);
-    const floorAmigo = extreme.AMIGO ? floorTop20 : Math.min(floorTop20, floorAmigoNormal());
-    const disponible = giveable.AMIGO - floorAmigo;
-    if (disponible > 0) addMov('AMIGO', dest.store, Math.min(disponible, falta));
-  });
+  // 1) Casos extremos (top20 del destino) primero.
+  if (extreme.AMIGO) {
+    // Si el propio Amigó también tiene este SKU en su top20, no es un mero
+    // proveedor: compite por su propio stock igual que las demás tiendas
+    // top20. En vez de proteger solo una reserva mínima fija y ceder el
+    // resto, se reparte el margen (stock-ventas) de forma equitativa entre
+    // Amigó y el resto de destinos top20 — moviendo de 1 en 1 desde quien
+    // mejor margen tenga hacia quien peor lo tenga, hasta que se igualen.
+    const extremos = STORES.filter(s => extreme[s]);
+    let guard = 0;
+    while (guard++ < 200) {
+      const conMargen = extremos.map(s => ({ store: s, diff: stock[s] - sales[s] })).sort((a, b) => b.diff - a.diff);
+      const origen = conMargen[0];
+      const destino = conMargen[conMargen.length - 1];
+      if (origen.store === destino.store || origen.diff <= destino.diff) break;
+      if (giveable[origen.store] <= 1) break; // nunca deja el origen a 0
+      addMov(origen.store, destino.store, 1);
+    }
+  } else {
+    // Amigó se permite bajar mucho más (reserva mínima absoluta) para
+    // ayudar a un top20 que ni siquiera vende él mismo — usa el que sea
+    // más permisivo entre ese mínimo y su suelo normal (venta+margen).
+    destinos.filter(d => extreme[d.store]).forEach(dest => {
+      if (dest.store === 'AMIGO') return; // Amigó no se traspasa a sí mismo.
+      const falta = fullNeedTarget(dest.store) - stock[dest.store];
+      if (falta <= 0) return;
+      const floorTop20 = Math.max(cfg.repoAmigoTop20MinStock, 1);
+      const floorAmigo = Math.min(floorTop20, floorAmigoNormal());
+      const disponible = giveable.AMIGO - floorAmigo;
+      if (disponible > 0) addMov('AMIGO', dest.store, Math.min(disponible, falta));
+    });
+  }
 
   // 2) Tiendas normales, en tres pasadas de prioridad decreciente:
   //   a) venta base (breakeven): se reparte de 1 en 1 hacia quien peor
