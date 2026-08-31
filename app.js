@@ -42,7 +42,9 @@ function defaultState() {
     dashboard: [],           // resultado calculado del pedido actualmente abierto
     pedidos: [],             // pedidos guardados: {id, titulo, cliente, creadoEn, actualizadoEn, pedido, dashboard}
     pedidoActualId: null,    // id del pedido abierto en state.pedido/state.dashboard, o null si es un borrador sin guardar
-    repoSemanal: { rows: [], colFilters: [], onlyWithMovement: false, hideTop20: false, sortBy: null, tableZoom: 100, hideRevisadas: false, onlyDebateFuerte: false }, // rows: [{sku, nombre, stock:{AMIGO..}, sales:{AMIGO..}, movimientos:[{from,to,qty}], top20:{AMIGO..}, revisado}]; sortBy: {key, dir} | null; tableZoom: % de zoom de la tabla de revisión
+    repoSemanal: { rows: [], colFilters: [], onlyWithMovement: false, hideTop20: false, sortBy: null, tableZoom: 100, hideRevisadas: false, onlyDebateFuerte: false }, // rows: [{sku, nombre, stock:{AMIGO..}, sales:{AMIGO..}, movimientos:[{from,to,qty}], movimientosOriginal:[...], top20:{AMIGO..}, revisado}]; sortBy: {key, dir} | null; tableZoom: % de zoom de la tabla de revisión
+    repoSemanalHistory: [],  // snapshots de semanas anteriores: [{fecha, rows:[{sku,nombre,stock,sales,movimientos}]}], más reciente al final
+    importMappings: {},      // recuerda el mapeo de columnas usado la última vez por cada flujo de importación: {repo: {campo: 'Nombre de columna del CSV'}}
   };
 }
 
@@ -91,7 +93,10 @@ function mergeIntoDefault(parsed) {
     if (!r.top20) r.top20 = {};
     STORES.forEach(s => { if (r.top20[s] === undefined) r.top20[s] = false; });
     if (typeof r.revisado !== 'boolean') r.revisado = false;
+    if (!Array.isArray(r.movimientosOriginal)) r.movimientosOriginal = [];
   });
+  if (!Array.isArray(merged.repoSemanalHistory)) merged.repoSemanalHistory = [];
+  if (!merged.importMappings || typeof merged.importMappings !== 'object') merged.importMappings = {};
   return merged;
 }
 
@@ -218,11 +223,17 @@ function downloadCSV(filename, headerRow, rows) {
 
 /* ============ Mapeo genérico de columnas CSV ============ */
 
-function renderMapping(container, headers, fields, onConfirm) {
+// mappingKey (opcional): si se pasa, recuerda el mapeo confirmado (por
+// NOMBRE de columna, no por posición — el orden puede cambiar de una
+// semana a otra) en state.importMappings[mappingKey], y lo usa para
+// preseleccionar en la próxima importación en vez de depender solo de la
+// adivinanza por regex.
+function renderMapping(container, headers, fields, onConfirm, mappingKey) {
   container.innerHTML = '';
   const grid = document.createElement('div');
   grid.className = 'mapping-grid';
   const selects = {};
+  const saved = (mappingKey && state.importMappings && state.importMappings[mappingKey]) || {};
 
   fields.forEach(f => {
     const wrap = document.createElement('div');
@@ -233,10 +244,15 @@ function renderMapping(container, headers, fields, onConfirm) {
     const blank = document.createElement('option');
     blank.value = ''; blank.textContent = '-- no mapear --';
     select.appendChild(blank);
+    const savedIdx = saved[f.key] !== undefined ? headers.indexOf(saved[f.key]) : -1;
     headers.forEach((h, idx) => {
       const opt = document.createElement('option');
       opt.value = idx; opt.textContent = h;
-      if (f.guess && new RegExp(f.guess, 'i').test(h)) opt.selected = true;
+      if (savedIdx !== -1) {
+        if (idx === savedIdx) opt.selected = true;
+      } else if (f.guess && new RegExp(f.guess, 'i').test(h)) {
+        opt.selected = true;
+      }
       select.appendChild(opt);
     });
     wrap.appendChild(label);
@@ -246,6 +262,12 @@ function renderMapping(container, headers, fields, onConfirm) {
   });
 
   container.appendChild(grid);
+  if (mappingKey && Object.keys(saved).length) {
+    const note = document.createElement('p');
+    note.className = 'hint';
+    note.textContent = 'Se ha preseleccionado el mapeo usado la última vez. Revísalo y ajusta si el formato del CSV ha cambiado.';
+    container.appendChild(note);
+  }
   const btn = document.createElement('button');
   btn.className = 'btn-primary';
   btn.textContent = 'Confirmar importación';
@@ -258,6 +280,12 @@ function renderMapping(container, headers, fields, onConfirm) {
       if (f.required && mapping[f.key] === null) ok = false;
     });
     if (!ok) { toast('Faltan columnas obligatorias por mapear.'); return; }
+    if (mappingKey) {
+      const toSave = {};
+      fields.forEach(f => { if (mapping[f.key] !== null) toSave[f.key] = headers[mapping[f.key]]; });
+      state.importMappings[mappingKey] = toSave;
+      saveState();
+    }
     onConfirm(mapping);
     container.innerHTML = '<p class="muted">Importación aplicada.</p>';
   };
@@ -1461,6 +1489,7 @@ document.getElementById('inputRepoReport').addEventListener('change', async (e) 
     const fresh = [];
     let skippedWholesale = 0;
     let skippedExcluded = 0;
+    const negativos = []; // [{sku, campo, valor}] — dato negativo, probable error del CSV origen
     rows.forEach(r => {
       const sku = normalizeSku(r[mapping.sku]);
       if (!sku) return;
@@ -1469,7 +1498,7 @@ document.getElementById('inputRepoReport').addEventListener('change', async (e) 
       if (isExcludedFromRepoImport(sku)) { skippedExcluded++; return; }
       let entry = bySku[sku];
       if (!entry) {
-        entry = { sku, nombre: nombreRaw, stock: {}, sales: {}, movimientos: [], top20: {}, revisado: false };
+        entry = { sku, nombre: nombreRaw, stock: {}, sales: {}, movimientos: [], movimientosOriginal: [], top20: {}, revisado: false };
         STORES.forEach(s => { entry.stock[s] = 0; entry.sales[s] = 0; entry.top20[s] = false; });
         bySku[sku] = entry;
         fresh.push(entry);
@@ -1479,11 +1508,17 @@ document.getElementById('inputRepoReport').addEventListener('change', async (e) 
         const salesCol = mapping['sales_' + s];
         if (stockCol !== null) {
           const v = parseInt(r[stockCol], 10);
-          if (!isNaN(v)) entry.stock[s] += v;
+          if (!isNaN(v)) {
+            entry.stock[s] += v;
+            if (v < 0) negativos.push({ sku, campo: `Stock ${STORE_ABBR[s]}` });
+          }
         }
         if (salesCol !== null) {
           const v = parseInt(r[salesCol], 10);
-          if (!isNaN(v)) entry.sales[s] += v;
+          if (!isNaN(v)) {
+            entry.sales[s] += v;
+            if (v < 0) negativos.push({ sku, campo: `Ventas ${STORE_ABBR[s]}` });
+          }
         }
       });
       // Las ventas online se sirven desde el almacén de Amigó, así que se
@@ -1491,20 +1526,138 @@ document.getElementById('inputRepoReport').addEventListener('change', async (e) 
       const onlineCol = mapping.sales_ONLINE;
       if (onlineCol !== null) {
         const v = parseInt(r[onlineCol], 10);
-        if (!isNaN(v)) entry.sales.AMIGO += v;
+        if (!isNaN(v)) {
+          entry.sales.AMIGO += v;
+          if (v < 0) negativos.push({ sku, campo: 'Ventas Online' });
+        }
       }
     });
+    const sinDatos = fresh.filter(r => repoTotal(r.stock) === 0 && repoTotal(r.sales) === 0).map(r => r.sku);
+
+    // Antes de reemplazar los datos, archiva la semana anterior (si había
+    // alguna) para poder compararla y consultarla más adelante.
+    const anterior = state.repoSemanal.rows;
+    if (anterior.length) {
+      state.repoSemanalHistory.push({
+        fecha: new Date().toISOString(),
+        rows: anterior.map(r => ({ sku: r.sku, nombre: r.nombre, stock: r.stock, sales: r.sales, movimientos: r.movimientos })),
+      });
+      if (state.repoSemanalHistory.length > 26) state.repoSemanalHistory = state.repoSemanalHistory.slice(-26);
+    }
+    const comparacion = compararConSemanaAnterior(anterior, fresh);
+
     state.repoSemanal.rows = fresh;
     computeTop20();
     saveState();
     renderRepoImportCount();
+    renderRepoImportChecks({ ...comparacion, negativos, sinDatos });
+    renderRepoHistoryList();
     renderRepoTable();
     const omitidos = [];
     if (skippedWholesale) omitidos.push(`${skippedWholesale} Wholesale`);
     if (skippedExcluded) omitidos.push(`${skippedExcluded} excluidos`);
     toast(`Repo semanal: ${fresh.length} SKUs importados` + (omitidos.length ? ` (${omitidos.join(', ')} omitidos).` : '.'));
-  });
+  }, 'repo');
 });
+
+function repoTotal(porTienda) {
+  return STORES.reduce((a, s) => a + (porTienda[s] || 0), 0);
+}
+
+// Compara el import nuevo contra la última semana archivada: SKUs nuevos,
+// SKUs que ya no aparecen, y referencias cuya venta o stock total ha dado
+// un salto brusco (posible error de exportación, o simplemente algo que
+// merece un vistazo antes de fiarse del cálculo). "Brusco" es una regla
+// simple y deliberadamente conservadora: al menos min unidades antes y
+// después Y el valor se ha más que duplicado o se ha reducido a menos de
+// un tercio — para no avisar por ruido en cifras pequeñas.
+function compararConSemanaAnterior(anteriorRows, freshRows) {
+  if (!anteriorRows || !anteriorRows.length) return { nuevos: [], desaparecidos: [], saltosBruscos: [] };
+  const porSkuAnterior = {};
+  anteriorRows.forEach(r => { porSkuAnterior[r.sku] = r; });
+  const porSkuNuevo = {};
+  freshRows.forEach(r => { porSkuNuevo[r.sku] = r; });
+
+  const nuevos = freshRows.filter(r => !porSkuAnterior[r.sku]).map(r => r.sku);
+  const desaparecidos = anteriorRows.filter(r => !porSkuNuevo[r.sku]).map(r => r.sku);
+
+  function saltoBrusco(antes, ahora) {
+    const MIN = 5;
+    if (antes < MIN && ahora < MIN) return false;
+    if (antes === 0) return ahora >= MIN;
+    return ahora >= antes * 2 || ahora <= antes / 3;
+  }
+  const saltosBruscos = [];
+  freshRows.forEach(r => {
+    const prev = porSkuAnterior[r.sku];
+    if (!prev) return;
+    const stockAntes = repoTotal(prev.stock), stockAhora = repoTotal(r.stock);
+    const salesAntes = repoTotal(prev.sales), salesAhora = repoTotal(r.sales);
+    if (saltoBrusco(stockAntes, stockAhora)) {
+      saltosBruscos.push({ sku: r.sku, campo: 'Stock total', antes: stockAntes, ahora: stockAhora });
+    }
+    if (saltoBrusco(salesAntes, salesAhora)) {
+      saltosBruscos.push({ sku: r.sku, campo: 'Venta total', antes: salesAntes, ahora: salesAhora });
+    }
+  });
+  return { nuevos, desaparecidos, saltosBruscos };
+}
+
+// Pinta los avisos tras importar: SKUs nuevos/desaparecidos frente a la
+// semana anterior archivada, saltos bruscos de stock/venta, valores
+// negativos en el CSV, y referencias sin ningún dato de stock/venta. Cada
+// bloque es un <details> plegado para no saturar la pantalla si no hay
+// nada relevante que mirar.
+function renderRepoImportChecks({ nuevos, desaparecidos, saltosBruscos, negativos, sinDatos }) {
+  const el = document.getElementById('repoImportChecks');
+  if (!el) return;
+  const bloques = [];
+  function bloque(titulo, items, render) {
+    if (!items.length) return;
+    bloques.push(`<details class="import-check-block"><summary>${titulo} (${items.length})</summary>${render(items)}</details>`);
+  }
+  bloque('SKUs nuevos frente a la semana anterior', nuevos, (items) => `<p>${items.join(', ')}</p>`);
+  bloque('SKUs que ya no aparecen (desaparecidos)', desaparecidos, (items) => `<p>${items.join(', ')}</p>`);
+  bloque('Saltos bruscos de stock/venta a revisar', saltosBruscos, (items) =>
+    `<ul>${items.map(i => `<li>${i.sku} — ${i.campo}: ${i.antes} → ${i.ahora}</li>`).join('')}</ul>`);
+  bloque('Valores negativos en el CSV (revisa el origen)', negativos, (items) =>
+    `<ul>${items.map(i => `<li>${i.sku} — ${i.campo}</li>`).join('')}</ul>`);
+  bloque('Referencias sin ningún dato de stock/venta', sinDatos, (items) => `<p>${items.join(', ')}</p>`);
+  el.innerHTML = bloques.join('');
+}
+
+// Lista plegable de las semanas archivadas (la más reciente primero), con
+// un botón para descargar esa foto en CSV a modo de consulta/backup.
+function renderRepoHistoryList() {
+  const el = document.getElementById('repoHistoryList');
+  if (!el) return;
+  const historial = state.repoSemanalHistory || [];
+  if (!historial.length) { el.innerHTML = '<p class="muted">Todavía no hay semanas archivadas — se archivan automáticamente cada vez que importas un CSV nuevo sobre datos ya existentes.</p>'; return; }
+  el.innerHTML = [...historial].reverse().map((snap, i) => {
+    const idx = historial.length - 1 - i;
+    const fecha = new Date(snap.fecha).toLocaleString('es-ES');
+    const movs = snap.rows.reduce((a, r) => a + (r.movimientos || []).filter(m => m.qty > 0).length, 0);
+    return `<div class="history-row">
+      <span>${fecha} — ${snap.rows.length} SKUs, ${movs} traspasos</span>
+      <button type="button" class="btn-small" data-history-idx="${idx}">Descargar CSV</button>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('[data-history-idx]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const snap = state.repoSemanalHistory[parseInt(btn.dataset.historyIdx, 10)];
+      const rowsOut = snap.rows.map(r => [
+        r.sku, r.nombre,
+        ...STORES.map(s => r.stock[s] || 0),
+        ...STORES.map(s => r.sales[s] || 0),
+        (r.movimientos || []).filter(m => m.qty > 0).map(m => `${m.from}>${m.to}:${m.qty}`).join(';'),
+      ]);
+      const header = ['SKU', 'Producto', ...STORES.map(s => 'Stock_' + s), ...STORES.map(s => 'Ventas_' + s), 'Traspasos'];
+      const fecha = new Date(snap.fecha).toISOString().slice(0, 10);
+      const a = downloadCSV(`repo_historico_${fecha}.csv`, header, rowsOut);
+      a.click();
+    });
+  });
+}
 
 // Calcula los traspasos de un SKU según necesidad real, no proporción de
 // ventas: cada tienda destino tiene un margen objetivo (ventas + colchón) y
@@ -1794,6 +1947,11 @@ document.getElementById('btnCalcularRepo').addEventListener('click', () => {
   computeTop20();
   state.repoSemanal.rows.forEach(row => {
     row.movimientos = computeMovimientosParaFila(row);
+    // Copia aparte de la sugerencia tal cual la calculó el algoritmo, para
+    // poder restaurarla si luego se edita una cantidad a mano por error
+    // (botón "↺" por fila en la tabla de revisión) sin tener que volver a
+    // pulsar "Calcular" (que recalcularía TODAS las filas, no solo esta).
+    row.movimientosOriginal = JSON.parse(JSON.stringify(row.movimientos));
   });
   saveState();
   renderRepoTable();
@@ -1803,6 +1961,19 @@ document.getElementById('btnCalcularRepo').addEventListener('click', () => {
 function movQtyForPair(row, from, to) {
   const m = (row.movimientos || []).find(mv => mv.from === from && mv.to === to);
   return m ? m.qty : 0;
+}
+
+// ¿Difiere row.movimientos de la sugerencia original guardada al calcular
+// (row.movimientosOriginal)? Compara por contenido (par + cantidad), no
+// por orden del array, ya que editar/quitar una cantidad puede reordenar
+// las entradas sin que eso sea un cambio real.
+function repoRowEditada(row) {
+  const norm = (movs) => (movs || [])
+    .filter(m => m.qty > 0)
+    .map(m => `${m.from}>${m.to}:${m.qty}`)
+    .sort()
+    .join('|');
+  return norm(row.movimientos) !== norm(row.movimientosOriginal);
 }
 
 function setMovQtyForPair(row, from, to, qty) {
@@ -1869,7 +2040,7 @@ function repoTableHeadHtml(pinnedStore) {
     return `<th class="movCol${active ? ' colFilterActive' : ''}">${sortLabelHtml('mov_' + key, `${STORE_ABBR[f]}→${STORE_ABBR[t]}`)}
       <button type="button" class="colFilterBtn${active ? ' active' : ''}" data-pair="${key}" title="Ver solo filas con movimiento en ${STORE_ABBR[f]}→${STORE_ABBR[t]}">▾ filtrar</button></th>`;
   }).join('');
-  return `<tr><th>${sortLabelHtml('nombre', 'Producto')}</th><th>${sortLabelHtml('sku', 'SKU')}</th>${pinnedTh}${top20Th}${stockSalesTh}${movTh}<th>${sortLabelHtml('revisado', 'Revisado')}</th></tr>`;
+  return `<tr><th>${sortLabelHtml('nombre', 'Producto')}</th><th>${sortLabelHtml('sku', 'SKU')}</th>${pinnedTh}${top20Th}${stockSalesTh}${movTh}<th title="Restaurar la sugerencia original del algoritmo si has editado una cantidad a mano">Original</th><th>${sortLabelHtml('revisado', 'Revisado')}</th></tr>`;
 }
 
 // Las 6 columnas de traspaso (3 salidas + 3 entradas) que tocan a una tienda,
@@ -2032,9 +2203,11 @@ function renderRepoTableInner() {
     // más complejo de revisar a ojo (varios orígenes y/o destinos a la
     // vez) — se resalta el nombre para empezar la revisión por ahí.
     const nombreCls = activeMovCount >= 3 ? ' class="repo-strong-debate"' : '';
+    const editada = repoRowEditada(row);
+    const restaurarTd = `<td class="restaurar-col"><button type="button" class="btn-small restaurarBtn" data-sku="${row.sku}"${editada ? '' : ' disabled'} title="${editada ? 'Restaurar la sugerencia original del algoritmo (deshace todas las ediciones manuales de esta fila)' : 'Sin cambios manuales que restaurar'}">↺</button></td>`;
     const revisadoTd = `<td class="revisado-col"><input type="checkbox" class="revisadoCheckbox" data-sku="${row.sku}"${row.revisado ? ' checked' : ''} title="Marcar esta referencia como revisada"></td>`;
     if (row.revisado) tr.classList.add('row-revisada');
-    tr.innerHTML = `<td${nombreCls}>${row.nombre}</td><td>${row.sku}</td>${pinnedTd}${top20Td}${stockSalesTd}${movTd}${revisadoTd}`;
+    tr.innerHTML = `<td${nombreCls}>${row.nombre}</td><td>${row.sku}</td>${pinnedTd}${top20Td}${stockSalesTd}${movTd}${restaurarTd}${revisadoTd}`;
     tbody.appendChild(tr);
   });
 
@@ -2054,6 +2227,16 @@ function renderRepoTableInner() {
       row.revisado = e.target.checked;
       saveState();
       renderRepoTable();
+    });
+  });
+
+  tbody.querySelectorAll('.restaurarBtn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const row = state.repoSemanal.rows.find(r => r.sku === e.target.dataset.sku);
+      row.movimientos = JSON.parse(JSON.stringify(row.movimientosOriginal));
+      saveState();
+      renderRepoTable();
+      toast(`${row.sku}: restaurada la sugerencia original.`);
     });
   });
 
@@ -2141,6 +2324,38 @@ document.getElementById('repoOnlyDebateFuerte').addEventListener('change', (e) =
   saveState();
   renderRepoTable();
 });
+
+// "Ir a la siguiente pendiente": salta a la próxima fila sin revisar visible
+// en la tabla (respetando filtros/orden actuales), priorizando las de
+// debate fuerte mientras queden, para no tener que buscar el resaltado a
+// ojo por toda la tabla. Recuerda el SKU del último salto para poder ir
+// avanzando una a una en vez de quedarse siempre en la primera.
+let repoUltimaPendienteSku = null;
+document.getElementById('btnSiguientePendiente').addEventListener('click', () => {
+  const trs = Array.from(document.querySelectorAll('#tableRepo tbody tr'));
+  const pendientes = trs.filter(tr => {
+    const chk = tr.querySelector('.revisadoCheckbox');
+    return chk && !chk.checked;
+  });
+  if (!pendientes.length) {
+    toast('No quedan referencias pendientes de revisar (con los filtros actuales).');
+    repoUltimaPendienteSku = null;
+    return;
+  }
+  const debateFuerte = pendientes.filter(tr => tr.querySelector('td.repo-strong-debate'));
+  const pool = debateFuerte.length ? debateFuerte : pendientes;
+  let idx = 0;
+  if (repoUltimaPendienteSku) {
+    const prevIdx = pool.findIndex(tr => tr.querySelector('td:nth-child(2)').textContent.trim() === repoUltimaPendienteSku);
+    if (prevIdx !== -1) idx = (prevIdx + 1) % pool.length;
+  }
+  const target = pool[idx];
+  repoUltimaPendienteSku = target.querySelector('td:nth-child(2)').textContent.trim();
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  target.classList.add('row-flash');
+  setTimeout(() => target.classList.remove('row-flash'), 1200);
+});
+
 // Zoom porcentual de la tabla de revisión (monitor vs. portátil). Se aplica
 // con la propiedad CSS "zoom" sobre la caja de scroll, en vez de transform,
 // para que el navegador recalcule el layout (y por tanto el propio ancho/
@@ -2493,6 +2708,7 @@ function renderAll() {
   renderRepoImportCount();
   computeTop20();
   renderRepoTable();
+  renderRepoHistoryList();
   loadConfigForm();
   saveState();
 }

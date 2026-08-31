@@ -92,6 +92,21 @@ label input,label select{color:var(--text);}
 .mapping-field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);}
 .mapping-field select{width:100%;}
 
+/* Avisos tras importar (SKUs nuevos/desaparecidos, saltos bruscos,
+   negativos, sin datos) y lista de semanas archivadas. */
+.import-checks{margin-top:10px;display:flex;flex-direction:column;gap:6px;}
+.import-check-block{
+  border:1px solid var(--warn);background:var(--warn-bg);border-radius:6px;padding:8px 12px;font-size:12.5px;
+}
+.import-check-block summary{cursor:pointer;font-weight:600;color:var(--warn);}
+.import-check-block p, .import-check-block ul{margin:6px 0 0;}
+.import-check-block ul{padding-left:18px;}
+.history-row{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px;
+}
+.history-row:last-child{border-bottom:none;}
+
 .table-scroll{overflow-x:auto;}
 table{width:100%;border-collapse:collapse;font-size:12.5px;}
 th,td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap;}
@@ -245,9 +260,19 @@ th.colFilterActive{background:#dbeafe;color:var(--text);}
   border-right:2px solid var(--border-strong, #94a3b8);
 }
 
+/* Destello breve sobre la fila a la que salta "Ir a la siguiente
+   pendiente", para que sea fácil localizarla tras el scroll automático. */
+@keyframes repoRowFlash{
+  0%{background:#fde68a;}
+  100%{background:transparent;}
+}
+#tableRepo tbody tr.row-flash > td{ animation:repoRowFlash 1.2s ease-out; }
+
 /* Columna "Revisado" (checkbox manual) y atenuado de fila ya revisada, para
    poder retomar la revisión donde se dejó sin perder de vista lo pendiente. */
-#tableRepo td.revisado-col{ text-align:center; }
+#tableRepo td.revisado-col, #tableRepo td.restaurar-col{ text-align:center; }
+#tableRepo .restaurarBtn{ padding:2px 8px; }
+#tableRepo .restaurarBtn:disabled{ opacity:.3; cursor:default; }
 #tableRepo tbody tr.row-revisada > td:not(.repo-strong-debate){ opacity:.55; }
 #tableRepo tbody tr.row-revisada > td.repo-strong-debate{ opacity:.75; }
 
