@@ -238,6 +238,13 @@ th.colFilterActive{background:#dbeafe;color:var(--text);}
 /* Oculta las 4 columnas Top20 (checkbox "Ocultar columnas Top20") */
 #tableRepo.hide-top20 .top20-col{ display:none; }
 
+/* Borde tras la columna de Venta de cada tienda (2ª de su pareja
+   stock/venta), para agrupar visualmente las dos columnas de cada tienda
+   y separarlas de la siguiente al revisar la tabla. */
+#tableRepo td.store-group-end, #tableRepo th.store-group-end{
+  border-right:2px solid var(--border-strong, #94a3b8);
+}
+
 /* Columna "Revisado" (checkbox manual) y atenuado de fila ya revisada, para
    poder retomar la revisión donde se dejó sin perder de vista lo pendiente. */
 #tableRepo td.revisado-col{ text-align:center; }
