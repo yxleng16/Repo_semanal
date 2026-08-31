@@ -42,7 +42,7 @@ function defaultState() {
     dashboard: [],           // resultado calculado del pedido actualmente abierto
     pedidos: [],             // pedidos guardados: {id, titulo, cliente, creadoEn, actualizadoEn, pedido, dashboard}
     pedidoActualId: null,    // id del pedido abierto en state.pedido/state.dashboard, o null si es un borrador sin guardar
-    repoSemanal: { rows: [], colFilters: [], onlyWithMovement: false, hideTop20: false, sortBy: null, tableZoom: 100, hideRevisadas: false }, // rows: [{sku, nombre, stock:{AMIGO..}, sales:{AMIGO..}, movimientos:[{from,to,qty}], top20:{AMIGO..}, revisado}]; sortBy: {key, dir} | null; tableZoom: % de zoom de la tabla de revisión
+    repoSemanal: { rows: [], colFilters: [], onlyWithMovement: false, hideTop20: false, sortBy: null, tableZoom: 100, hideRevisadas: false, onlyDebateFuerte: false }, // rows: [{sku, nombre, stock:{AMIGO..}, sales:{AMIGO..}, movimientos:[{from,to,qty}], top20:{AMIGO..}, revisado}]; sortBy: {key, dir} | null; tableZoom: % de zoom de la tabla de revisión
   };
 }
 
@@ -82,6 +82,7 @@ function mergeIntoDefault(parsed) {
   if (merged.repoSemanal.sortBy === undefined) merged.repoSemanal.sortBy = null;
   if (typeof merged.repoSemanal.tableZoom !== 'number' || isNaN(merged.repoSemanal.tableZoom)) merged.repoSemanal.tableZoom = 100;
   if (typeof merged.repoSemanal.hideRevisadas !== 'boolean') merged.repoSemanal.hideRevisadas = false;
+  if (typeof merged.repoSemanal.onlyDebateFuerte !== 'boolean') merged.repoSemanal.onlyDebateFuerte = false;
   merged.repoSemanal.rows.forEach(r => {
     if (!r.stock) r.stock = {};
     if (!r.sales) r.sales = {};
@@ -1852,11 +1853,14 @@ function sortLabelHtml(key, label) {
 function repoTableHeadHtml(pinnedStore) {
   const pinnedTh = pinnedStore
     ? `<th class="pinned-col-1">${sortLabelHtml('stock_' + pinnedStore, `Stock ${STORE_ABBR[pinnedStore]}`)}</th>` +
-      `<th class="pinned-col-2">${sortLabelHtml('sales_' + pinnedStore, `Ventas 1m ${STORE_ABBR[pinnedStore]}`)}</th>`
+      `<th class="pinned-col-2 store-group-end">${sortLabelHtml('sales_' + pinnedStore, `Ventas 1m ${STORE_ABBR[pinnedStore]}`)}</th>`
     : '';
   const top20Th = STORES.map(s => `<th class="top20-col">${sortLabelHtml('top20_' + s, `Top20 ${STORE_ABBR[s]}`)}</th>`).join('');
+  // store-group-end marca la 2ª columna de cada pareja stock/venta, para
+  // dibujar un borde que agrupe visualmente las dos columnas de cada
+  // tienda y las separe de la siguiente (ver CSS en style.css).
   const stockSalesTh = STORES.filter(s => s !== pinnedStore).map(s =>
-    `<th>${sortLabelHtml('stock_' + s, `Stock ${STORE_ABBR[s]}`)}</th><th>${sortLabelHtml('sales_' + s, `Ventas 1m ${STORE_ABBR[s]}`)}</th>`
+    `<th>${sortLabelHtml('stock_' + s, `Stock ${STORE_ABBR[s]}`)}</th><th class="store-group-end">${sortLabelHtml('sales_' + s, `Ventas 1m ${STORE_ABBR[s]}`)}</th>`
   ).join('');
   const activeFilters = state.repoSemanal.colFilters || [];
   const movTh = MOVEMENT_ORDER.map(([f, t]) => {
@@ -1957,6 +1961,8 @@ function renderRepoTableInner() {
   if (hideTop20El) hideTop20El.checked = !!state.repoSemanal.hideTop20;
   const hideRevisadasEl = document.getElementById('repoHideRevisadas');
   if (hideRevisadasEl) hideRevisadasEl.checked = !!state.repoSemanal.hideRevisadas;
+  const onlyDebateFuerteEl = document.getElementById('repoOnlyDebateFuerte');
+  if (onlyDebateFuerteEl) onlyDebateFuerteEl.checked = !!state.repoSemanal.onlyDebateFuerte;
   const zoomEl = document.getElementById('repoTableZoom');
   if (zoomEl) zoomEl.value = String(state.repoSemanal.tableZoom || 100);
   applyRepoTableZoom();
@@ -1973,6 +1979,9 @@ function renderRepoTableInner() {
   }
   if (state.repoSemanal.hideRevisadas) {
     rows = rows.filter(r => !r.revisado);
+  }
+  if (state.repoSemanal.onlyDebateFuerte) {
+    rows = rows.filter(r => !r.revisado && repoActiveMovCount(r) >= 3);
   }
   if (activeFilters.length) {
     rows = rows.filter(r => activeFilters.some(key => {
@@ -1996,10 +2005,10 @@ function renderRepoTableInner() {
   sortedRows.forEach((row) => {
     const tr = document.createElement('tr');
     const pinnedTd = pinnedStore
-      ? `<td class="pinned-col-1">${row.stock[pinnedStore] || 0}</td><td class="pinned-col-2">${row.sales[pinnedStore] || 0}</td>`
+      ? `<td class="pinned-col-1">${row.stock[pinnedStore] || 0}</td><td class="pinned-col-2 store-group-end">${row.sales[pinnedStore] || 0}</td>`
       : '';
     const top20Td = STORES.map(s => `<td class="top20-col ${row.top20 && row.top20[s] ? 'top20-yes' : 'top20-no'}">${row.top20 && row.top20[s] ? 'SI' : 'NO'}</td>`).join('');
-    const stockSalesTd = STORES.filter(s => s !== pinnedStore).map(s => `<td>${row.stock[s] || 0}</td><td>${row.sales[s] || 0}</td>`).join('');
+    const stockSalesTd = STORES.filter(s => s !== pinnedStore).map(s => `<td>${row.stock[s] || 0}</td><td class="store-group-end">${row.sales[s] || 0}</td>`).join('');
     // Si un mismo SKU tiene más de un traspaso a la vez (p. ej. recibe de una
     // tienda y envía a otra), se resaltan sus cantidades para que no pasen
     // desapercibidas al revisar la fila. Si además una cantidad supera el
@@ -2124,6 +2133,11 @@ document.getElementById('repoHideTop20').addEventListener('change', (e) => {
 });
 document.getElementById('repoHideRevisadas').addEventListener('change', (e) => {
   state.repoSemanal.hideRevisadas = e.target.checked;
+  saveState();
+  renderRepoTable();
+});
+document.getElementById('repoOnlyDebateFuerte').addEventListener('change', (e) => {
+  state.repoSemanal.onlyDebateFuerte = e.target.checked;
   saveState();
   renderRepoTable();
 });
