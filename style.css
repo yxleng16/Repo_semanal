@@ -42,7 +42,7 @@ nav.tabs{
 }
 .tab-btn.active{color:var(--text);border-bottom-color:var(--accent);font-weight:600;}
 
-main{padding:20px;max-width:1200px;margin:0 auto;}
+main{padding:20px;max-width:1600px;margin:0 auto;}
 .tab-panel{display:none;}
 .tab-panel.active{display:block;}
 
@@ -92,6 +92,30 @@ label input,label select{color:var(--text);}
 .mapping-field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);}
 .mapping-field select{width:100%;}
 
+/* Avisos tras importar (SKUs nuevos/desaparecidos, saltos bruscos,
+   negativos, sin datos) y lista de semanas archivadas. */
+.import-checks{margin-top:10px;display:flex;flex-direction:column;gap:6px;}
+.import-check-block{
+  border:1px solid var(--warn);background:var(--warn-bg);border-radius:6px;padding:8px 12px;font-size:12.5px;
+}
+.import-check-block summary{cursor:pointer;font-weight:600;color:var(--warn);}
+.import-check-block p, .import-check-block ul{margin:6px 0 0;}
+.import-check-block ul{padding-left:18px;}
+.history-row{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px;
+}
+.history-row:last-child{border-bottom:none;}
+
+/* Pestaña Tendencias: gráfico de barras por tienda, sparklines por SKU en
+   la tabla top20, y listas de mayor subida/caída en dos columnas. */
+.trend-chart{width:100%;height:auto;max-width:720px;}
+.sparkline{width:100px;height:28px;display:block;}
+.trend-cols{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+.trend-list{margin:6px 0 0;padding-left:18px;font-size:12.5px;}
+.trend-list li{margin-bottom:4px;}
+@media (max-width:640px){ .trend-cols{grid-template-columns:1fr;} }
+
 .table-scroll{overflow-x:auto;}
 table{width:100%;border-collapse:collapse;font-size:12.5px;}
 th,td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap;}
@@ -118,6 +142,7 @@ tbody tr:hover{background:var(--bg);}
   background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:12px;
 }
 .store-summary .chip b{display:block;font-size:16px;}
+.store-summary .chip.chip-warn{background:var(--danger-bg);border-color:var(--danger);color:var(--danger);}
 
 .download-links{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;}
 .download-links a{
@@ -137,11 +162,128 @@ tbody tr:hover{background:var(--bg);}
 #tableRepo .movPairInput{width:52px;padding:4px 6px;text-align:right;}
 #tableRepo th.movCol{white-space:nowrap;}
 .colFilterBtn{
-  border:none;background:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0 0 3px;vertical-align:middle;
+  display:block;margin-top:3px;border:1px solid var(--border);background:var(--panel);border-radius:5px;
+  color:var(--muted);cursor:pointer;font-size:11px;padding:2px 6px;
 }
-.colFilterBtn:hover{color:var(--text);}
-.colFilterBtn.active{color:var(--accent);font-weight:700;}
+.colFilterBtn:hover{background:var(--bg);color:var(--text);}
+.colFilterBtn.active{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700;}
 th.colFilterActive{background:#dbeafe;color:var(--text);}
+
+/* Cabeceras clicables para ordenar la tabla de traspasos por esa columna */
+.sortLabel{cursor:pointer;}
+.sortLabel:hover{text-decoration:underline;color:var(--text);}
+.sortLabel.active{color:var(--accent);font-weight:700;}
+
+/* La cantidad a traspasar supera el stock disponible en la tienda de
+   origen: aviso de dato a revisar, con prioridad sobre el resaltado de
+   "múltiples traspasos" en la misma fila. */
+.movPairInput.qty-exceeds-stock{background:var(--danger-bg);border-color:var(--danger);color:var(--danger);font-weight:700;}
+
+/* Resalta la cantidad cuando esa misma referencia tiene más de un traspaso a
+   la vez, para que no pase desapercibido al revisar la fila. */
+.movPairInput.multi-mov{background:var(--warn-bg);border-color:var(--warn);color:var(--warn);font-weight:700;}
+
+/* Barra de atajos de filtrado sobre la tabla de traspasos */
+.repo-filter-toolbar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:10px;}
+.repo-filter-toolbar .checkbox-label{margin-bottom:0;}
+.store-chip-group{display:flex;gap:6px;}
+.chip-btn{
+  border:1px solid var(--border);background:var(--panel);border-radius:20px;padding:6px 14px;
+  font-size:12.5px;font-weight:600;cursor:pointer;color:var(--text);
+}
+.chip-btn:hover{background:var(--bg);}
+.chip-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+
+/* La tabla tiene muchas columnas (Top20, stock/ventas, 12 traspasos): que
+   crezca a su ancho natural para que no comprima las columnas fijas de
+   abajo y para que el scroll horizontal funcione con anchos predecibles. */
+#tableRepo{width:auto;min-width:100%;}
+
+/* La caja de scroll de esta tabla tiene alto acotado (fijado por JS según
+   el hueco real hasta el borde de la ventana — ver adjustRepoTableScrollHeight
+   en app.js): así su barra de desplazamiento horizontal (y la vertical, si
+   hay muchas filas) quedan siempre a la vista cerca de la cabecera, sin
+   tener que bajar toda la página para llegar a ellas. La cabecera
+   (position:sticky;top:0) queda fija arriba de ESTA caja al desplazar filas.
+   El max-height de aquí es solo el valor de respaldo antes de que JS calcule
+   el real. */
+#tab-traspasos .table-scroll{max-height:65vh;overflow-y:auto;}
+
+/* Congela Producto y SKU al desplazar la tabla en horizontal (hay muchas
+   columnas de stock/ventas/traspaso a la derecha). */
+#tableRepo td:nth-child(1), #tableRepo th:nth-child(1){
+  position:sticky;left:0;z-index:2;background:var(--panel);
+  width:180px;min-width:180px;max-width:180px;overflow:hidden;text-overflow:ellipsis;
+}
+#tableRepo td:nth-child(2), #tableRepo th:nth-child(2){
+  position:sticky;left:180px;z-index:2;background:var(--panel);
+  width:100px;min-width:100px;max-width:100px;overflow:hidden;text-overflow:ellipsis;
+  box-shadow:2px 0 4px -2px rgba(0,0,0,.2);
+}
+#tableRepo thead th:nth-child(1), #tableRepo thead th:nth-child(2){ z-index:4; }
+#tableRepo tbody tr:hover td:nth-child(1), #tableRepo tbody tr:hover td:nth-child(2){ background:var(--bg); }
+
+/* Nombre de producto resaltado cuando la fila tiene 3+ traspasos
+   simultáneos (reparto complejo, con varios orígenes y/o destinos a la
+   vez) — para poder empezar la revisión manual por esas referencias. Solo
+   borde+color, sin tocar el fondo, para no chocar con el sticky/hover/
+   selección de celda de esa misma columna. */
+#tableRepo td.repo-strong-debate{
+  border-left:4px solid var(--danger);
+  color:var(--danger);
+  font-weight:700;
+}
+
+/* Al filtrar por una tienda concreta (chip AMI/MAD/RAM/VLC), sus columnas de
+   venta y stock se sacan del bloque normal (ver getPinnedStore en app.js) y
+   se fijan justo detrás de Producto/SKU, para poder comprobar ese dato sin
+   perderlo de vista al desplazar la tabla en horizontal. */
+#tableRepo td.pinned-col-1, #tableRepo th.pinned-col-1{
+  position:sticky;left:280px;z-index:2;background:var(--panel);
+  width:90px;min-width:90px;max-width:90px;
+}
+#tableRepo td.pinned-col-2, #tableRepo th.pinned-col-2{
+  position:sticky;left:370px;z-index:2;background:var(--panel);
+  width:90px;min-width:90px;max-width:90px;
+  box-shadow:2px 0 4px -2px rgba(0,0,0,.2);
+}
+#tableRepo thead th.pinned-col-1, #tableRepo thead th.pinned-col-2{ z-index:4; }
+#tableRepo tbody tr:hover td.pinned-col-1, #tableRepo tbody tr:hover td.pinned-col-2{ background:var(--bg); }
+/* Con columnas fijadas de por medio, el borde de "fin de zona fija" pasa a
+   la última columna fijada (pinned-col-2), no ya al SKU. */
+#tableRepo.store-pinned td:nth-child(2), #tableRepo.store-pinned th:nth-child(2){ box-shadow:none; }
+
+/* Resalta la fila y la columna de la celda pulsada, para comprobar más
+   fácil un dato concreto al revisar la tabla (ver el listener de clic sobre
+   #tableRepo tbody en app.js). */
+#tableRepo tbody tr.cell-selected-row > td{ background:#fef9c3 !important; }
+#tableRepo td.cell-selected-col, #tableRepo th.cell-selected-col{ background:#fef9c3 !important; }
+
+/* Oculta las 4 columnas Top20 (checkbox "Ocultar columnas Top20") */
+#tableRepo.hide-top20 .top20-col{ display:none; }
+
+/* Borde tras la columna de Venta de cada tienda (2ª de su pareja
+   stock/venta), para agrupar visualmente las dos columnas de cada tienda
+   y separarlas de la siguiente al revisar la tabla. */
+#tableRepo td.store-group-end, #tableRepo th.store-group-end{
+  border-right:2px solid var(--border-strong, #94a3b8);
+}
+
+/* Destello breve sobre la fila a la que salta "Ir a la siguiente
+   pendiente", para que sea fácil localizarla tras el scroll automático. */
+@keyframes repoRowFlash{
+  0%{background:#fde68a;}
+  100%{background:transparent;}
+}
+#tableRepo tbody tr.row-flash > td{ animation:repoRowFlash 1.2s ease-out; }
+
+/* Columna "Revisado" (checkbox manual) y atenuado de fila ya revisada, para
+   poder retomar la revisión donde se dejó sin perder de vista lo pendiente. */
+#tableRepo td.revisado-col, #tableRepo td.restaurar-col{ text-align:center; }
+#tableRepo .restaurarBtn{ padding:2px 8px; }
+#tableRepo .restaurarBtn:disabled{ opacity:.3; cursor:default; }
+#tableRepo tbody tr.row-revisada > td:not(.repo-strong-debate){ opacity:.55; }
+#tableRepo tbody tr.row-revisada > td.repo-strong-debate{ opacity:.75; }
 
 .toast{
   position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);

@@ -28,6 +28,7 @@
   <button class="tab-btn" data-tab="abastecidas">(WH) 5. Abastecidas</button>
   <button class="tab-btn" data-tab="repo">Repo semanal</button>
   <button class="tab-btn" data-tab="traspasos">Revisar traspasos</button>
+  <button class="tab-btn" data-tab="tendencias">Tendencias</button>
   <button class="tab-btn" data-tab="factura">Factura</button>
   <button class="tab-btn" data-tab="config">Reglas / Config</button>
 </nav>
@@ -179,11 +180,17 @@
       </label>
       <div id="mappingRepo" class="mapping-box"></div>
       <p class="muted">SKUs importados: <span id="repoImportCount">0</span></p>
+      <div id="repoImportChecks" class="import-checks"></div>
     </div>
     <div class="card">
       <button id="btnCalcularRepo" class="btn-primary">Calcular sugerencias de traspaso</button>
       <span class="muted" id="repoCalcInfo"></span>
       <p class="hint" style="margin:10px 0 0">Ve a la pestaña <strong>"Revisar traspasos"</strong> para ver, filtrar y editar a mano el resultado antes de descargar los CSV.</p>
+    </div>
+    <div class="card">
+      <h3>Histórico semanal</h3>
+      <p class="hint">Cada vez que importas un CSV nuevo sobre datos ya existentes, la semana anterior se archiva aquí automáticamente (con sus traspasos), para poder consultarla o compararla más adelante.</p>
+      <div id="repoHistoryList"></div>
     </div>
   </section>
 
@@ -195,7 +202,26 @@
         <h3>Traspasos por SKU</h3>
         <input type="search" id="repoFilter" placeholder="Filtrar por SKU o nombre...">
       </div>
-      <p class="hint">Las columnas Top20 muestran si la referencia está entre las 20 más vendidas del último mes en esa tienda (excluyendo gift cards, envoltorios/regalo y accesorios — configurable en "Reglas / Config"). Cada columna de traspaso es editable directamente; pulsa el embudo ▾ de su cabecera para ver solo las filas con movimiento en esa columna.</p>
+      <p class="hint">Las columnas Top20 muestran si la referencia está entre las 20 más vendidas del último mes en esa tienda (excluyendo gift cards, envoltorios/regalo y accesorios — configurable en "Reglas / Config"). Cada columna de traspaso es editable directamente; pulsa "▾ filtrar" en su cabecera para ver solo las filas con movimiento en esa columna, o usa los atajos de aquí abajo. Pulsa el nombre de cualquier cabecera para ordenar la tabla por esa columna. Las cantidades se resaltan en naranja cuando esa misma referencia tiene más de un traspaso a la vez, y en rojo cuando la cantidad supera el stock disponible en la tienda de origen. El nombre del producto se resalta en rojo cuando tiene 3 o más traspasos simultáneos, para empezar la revisión manual por ahí. Producto y SKU quedan fijos al desplazar la tabla en horizontal, y si filtras por una tienda con los atajos AMI/MAD/RAM/VLC también se fijan sus columnas de stock y venta. Pulsa cualquier celda para resaltar su fila y su columna y comprobar un dato más fácil. El control de tamaño ajusta el zoom de la tabla según trabajes desde monitor o portátil. La última columna "Revisado" permite marcar cada referencia a mano para retomar la revisión donde la dejaste; "Ocultar revisadas" filtra las ya marcadas, "Ver solo debate fuerte pendiente" y el botón "↓ Ir a la siguiente pendiente" saltan directo a las referencias con reparto complejo (3+ traspasos) que aún no has revisado sin tener que desplazarte a buscarlas, y el resumen de abajo muestra cuántas quedan de cada tipo. La columna "Original" (↺) restaura de un clic la sugerencia calculada por el algoritmo en esa fila si has editado alguna cantidad a mano por error. Un borde separa las dos columnas (stock y venta) de cada tienda del resto.</p>
+      <div class="repo-filter-toolbar">
+        <label class="checkbox-label"><input type="checkbox" id="repoOnlyWithMov"> Mostrar solo filas con algún traspaso</label>
+        <label class="checkbox-label"><input type="checkbox" id="repoHideTop20"> Ocultar columnas Top20</label>
+        <label class="checkbox-label"><input type="checkbox" id="repoHideRevisadas"> Ocultar revisadas</label>
+        <label class="checkbox-label"><input type="checkbox" id="repoOnlyDebateFuerte"> Ver solo debate fuerte pendiente</label>
+        <button type="button" id="btnSiguientePendiente" class="btn-small">↓ Ir a la siguiente pendiente</button>
+        <span class="muted">Traspasos de/hacia:</span>
+        <div class="store-chip-group" id="repoStoreChips"></div>
+        <label class="checkbox-label">Tamaño tabla
+          <select id="repoTableZoom">
+            <option value="75">75%</option>
+            <option value="90">90%</option>
+            <option value="100" selected>100%</option>
+            <option value="110">110%</option>
+            <option value="125">125%</option>
+            <option value="150">150%</option>
+          </select>
+        </label>
+      </div>
       <div id="repoColFilterInfo" class="inline-fields"></div>
       <div class="table-scroll"><table id="tableRepo"><thead><tr></tr></thead><tbody></tbody></table></div>
     </div>
@@ -205,7 +231,38 @@
     </div>
     <div class="card">
       <button id="btnGenerarCSVsRepo" class="btn-primary">Generar CSVs de traspaso (AMI/MAD/RAM/VLC)</button>
+      <button id="btnDescargarTodosRepo" class="btn-primary">Descargar todos a la vez</button>
       <div id="downloadLinksRepo" class="download-links"></div>
+      <button id="btnGenerarCSVUnicoRepo" class="btn-primary">Generar CSV único (todos los traspasos juntos)</button>
+      <div id="downloadLinksRepoUnico" class="download-links"></div>
+    </div>
+  </section>
+
+  <!-- TAB TENDENCIAS -->
+  <section id="tab-tendencias" class="tab-panel">
+    <h2>Tendencias de venta</h2>
+    <p class="hint">Se calcula a partir del histórico semanal archivado automáticamente al importar (más la semana actual). Hacen falta al menos 2 semanas de datos para ver evolución y tendencia — con 1 sola semana solo se muestran los totales.</p>
+    <div class="card">
+      <h3>Ventas totales por tienda, por semana</h3>
+      <div id="tendenciasChartTiendas"></div>
+    </div>
+    <div class="card">
+      <h3>Top 20 SKUs por venta reciente</h3>
+      <div class="table-scroll"><table id="tableTendenciasTop"><thead><tr>
+        <th>Producto</th><th>SKU</th><th>Venta última semana</th><th>Tendencia</th><th>Evolución</th>
+      </tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="card">
+      <div class="trend-cols">
+        <div>
+          <h3>Mayor subida</h3>
+          <div id="tendenciasSubidas"></div>
+        </div>
+        <div>
+          <h3>Mayor caída</h3>
+          <div id="tendenciasCaidas"></div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -260,8 +317,29 @@
       <label>Top20: prefijos de SKU a excluir (separados por coma)
         <input type="text" id="cfgTop20ExcludePrefixes" value="ACC,GC">
       </label>
+      <label>Repo semanal: prefijos de SKU a omitir del import (separados por coma)
+        <input type="text" id="cfgRepoImportExcludeSkuPrefixes" value="GIFT">
+      </label>
+      <label>Repo semanal: prefijos de SKU de accesorios, sin traspaso entre tiendas (separados por coma)
+        <input type="text" id="cfgRepoAccessorySkuPrefixes" value="ACC">
+      </label>
+      <label>Repo semanal: palabras del nombre de accesorios, sin traspaso entre tiendas (separadas por coma)
+        <input type="text" id="cfgRepoAccessoryKeywords" value="accesorio">
+      </label>
       <label>Top20: palabras del nombre a excluir (separadas por coma)
         <input type="text" id="cfgTop20ExcludeKeywords" value="gift card,tarjeta regalo,envoltorio,papel de regalo,bolsa de regalo,accesorio,gift wrap">
+      </label>
+      <label>Repo semanal: margen mínimo de Madrid (uds sobre sus ventas)
+        <input type="number" id="cfgRepoBufferMadrid" value="2" min="0">
+      </label>
+      <label>Repo semanal: margen mínimo de Rambla/Valencia (uds sobre sus ventas)
+        <input type="number" id="cfgRepoBufferRamblaValencia" value="1" min="0">
+      </label>
+      <label>Repo semanal: margen protegido de Amigó como origen (uds sobre sus ventas, caso normal)
+        <input type="number" id="cfgRepoAmigoProtectedMargin" value="1" min="0">
+      </label>
+      <label>Repo semanal: reserva mínima de Amigó como origen (uds de stock, caso top20 del destino)
+        <input type="number" id="cfgRepoAmigoTop20MinStock" value="3" min="0">
       </label>
       <button id="btnSaveConfig" class="btn-primary">Guardar criterios</button>
     </div>
