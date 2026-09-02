@@ -211,13 +211,52 @@ function toCSV(headerRow, rows) {
   return lines.join('\n');
 }
 
-function downloadCSV(filename, headerRow, rows) {
-  const csv = toCSV(headerRow, rows);
+// Resuelve la capacidad "downloads" solo si la app corre embebida como
+// artefacto de Claude (ahí SÍ existe window.claude antes de que se
+// ejecute este script; en GitHub Pages o un archivo local no existe en
+// absoluto, así que esto se queda en null y se usa la descarga clásica).
+const claudeDownloadsCap = (typeof window !== 'undefined' && window.claude && window.claude.use)
+  ? window.claude.use('downloads').catch(() => null)
+  : null;
+
+// Guarda un CSV ya generado (texto) con el nombre dado. Dentro de un
+// artefacto de Claude usa la capacidad "downloads" (el visor pide
+// confirmación al usuario); si no está disponible (GitHub Pages, archivo
+// local abierto directamente) cae en la descarga clásica del navegador
+// vía Blob + <a download>.
+async function saveCSVText(filename, csv) {
+  const dl = claudeDownloadsCap ? await claudeDownloadsCap : null;
+  if (dl) {
+    try {
+      await dl.save({ filename, data: csv });
+    } catch (err) {
+      if (!err || err.code !== 'declined') toast(`No se pudo guardar ${filename}${err && err.code ? ` (${err.code})` : ''}.`);
+    }
+    return;
+  }
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
+  const tmp = document.createElement('a');
+  tmp.href = url; tmp.download = filename;
+  document.body.appendChild(tmp);
+  tmp.click();
+  document.body.removeChild(tmp);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Genera un <a> que, al pulsarlo (con clic real o programático vía
+// .click()), guarda el CSV — nunca depende de sus atributos href/download
+// (que en un artefacto de Claude no funcionarían), así que el mismo botón
+// sirve igual en GitHub Pages que embebido en Claude.
+function downloadCSV(filename, headerRow, rows) {
+  const csv = toCSV(headerRow, rows);
   const a = document.createElement('a');
-  a.href = url; a.download = filename;
+  a.href = '#';
   a.textContent = filename;
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    saveCSVText(filename, csv);
+  });
   return a;
 }
 
