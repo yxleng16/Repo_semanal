@@ -28,6 +28,7 @@
   <button class="tab-btn" data-tab="abastecidas">(WH) 5. Abastecidas</button>
   <button class="tab-btn" data-tab="repo">Repo semanal</button>
   <button class="tab-btn" data-tab="traspasos">Revisar traspasos</button>
+  <button class="tab-btn" data-tab="tendencias">Tendencias</button>
   <button class="tab-btn" data-tab="factura">Factura</button>
   <button class="tab-btn" data-tab="config">Reglas / Config</button>
 </nav>
@@ -234,6 +235,34 @@
       <div id="downloadLinksRepo" class="download-links"></div>
       <button id="btnGenerarCSVUnicoRepo" class="btn-primary">Generar CSV único (todos los traspasos juntos)</button>
       <div id="downloadLinksRepoUnico" class="download-links"></div>
+    </div>
+  </section>
+
+  <!-- TAB TENDENCIAS -->
+  <section id="tab-tendencias" class="tab-panel">
+    <h2>Tendencias de venta</h2>
+    <p class="hint">Se calcula a partir del histórico semanal archivado automáticamente al importar (más la semana actual). Hacen falta al menos 2 semanas de datos para ver evolución y tendencia — con 1 sola semana solo se muestran los totales.</p>
+    <div class="card">
+      <h3>Ventas totales por tienda, por semana</h3>
+      <div id="tendenciasChartTiendas"></div>
+    </div>
+    <div class="card">
+      <h3>Top 20 SKUs por venta reciente</h3>
+      <div class="table-scroll"><table id="tableTendenciasTop"><thead><tr>
+        <th>Producto</th><th>SKU</th><th>Venta última semana</th><th>Tendencia</th><th>Evolución</th>
+      </tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="card">
+      <div class="trend-cols">
+        <div>
+          <h3>Mayor subida</h3>
+          <div id="tendenciasSubidas"></div>
+        </div>
+        <div>
+          <h3>Mayor caída</h3>
+          <div id="tendenciasCaidas"></div>
+        </div>
+      </div>
     </div>
   </section>
 
