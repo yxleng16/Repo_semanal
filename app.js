@@ -312,6 +312,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
     localStorage.setItem(TAB_STORAGE_KEY, btn.dataset.tab);
     if (btn.dataset.tab === 'traspasos') adjustRepoTableScrollHeight();
+    if (btn.dataset.tab === 'tendencias') renderTendencias();
   });
 });
 
@@ -1659,6 +1660,143 @@ function renderRepoHistoryList() {
   });
 }
 
+/* ============ Tendencias de venta ============ */
+// Se calculan a partir del histórico ya archivado (repoSemanalHistory) más
+// la semana actual (repoSemanal.rows, todavía sin archivar) — no se guarda
+// nada nuevo, es una lectura/agregación de datos que ya existían.
+
+const STORE_TREND_COLOR = { AMIGO: 'var(--accent)', MADRID: 'var(--ok)', RAMBLA: 'var(--warn)', VALENCIA: 'var(--danger)' };
+
+// Serie cronológica (más antigua primero) de semanas con datos: cada
+// entrada del histórico archivado, más la semana actual al final si hay
+// algo importado. Se limita a las últimas 12 para que el gráfico y las
+// evoluciones no se vuelvan ilegibles con muchos meses de historial.
+function tendenciasSerieSemanas() {
+  const historial = (state.repoSemanalHistory || []).map(h => ({
+    fecha: h.fecha, rows: h.rows,
+    label: new Date(h.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }),
+  }));
+  const serie = state.repoSemanal.rows.length
+    ? [...historial, { fecha: new Date().toISOString(), rows: state.repoSemanal.rows, label: 'Actual' }]
+    : historial;
+  return serie.slice(-12);
+}
+
+function tendenciasTotalesPorTienda(serie) {
+  return serie.map(w => {
+    const totales = {};
+    STORES.forEach(s => { totales[s] = 0; });
+    w.rows.forEach(r => STORES.forEach(s => { totales[s] += (r.sales && r.sales[s]) || 0; }));
+    return { label: w.label, totales };
+  });
+}
+
+// Serie de venta total (todas las tiendas) por SKU a lo largo de las
+// semanas de la serie — un array de tantas posiciones como semanas, 0
+// donde ese SKU no tuviera datos esa semana (dejó de venderse o es nuevo).
+function tendenciasSerieSkus(serie) {
+  const bySku = {};
+  serie.forEach((w, wi) => {
+    w.rows.forEach(r => {
+      if (!bySku[r.sku]) bySku[r.sku] = { sku: r.sku, nombre: r.nombre, valores: new Array(serie.length).fill(0) };
+      bySku[r.sku].nombre = r.nombre; // el nombre más reciente que tengamos
+      bySku[r.sku].valores[wi] = repoTotal(r.sales);
+    });
+  });
+  return Object.values(bySku);
+}
+
+function tendenciasBadgeHtml(antes, ahora) {
+  if (antes === 0 && ahora === 0) return '<span class="muted">—</span>';
+  if (antes === 0) return '<span class="badge badge-warn">nuevo</span>';
+  const pct = Math.round(((ahora - antes) / antes) * 100);
+  if (pct > 5) return `<span class="badge badge-ok">▲ +${pct}%</span>`;
+  if (pct < -5) return `<span class="badge badge-danger">▼ ${pct}%</span>`;
+  return '<span class="badge badge-muted">= estable</span>';
+}
+
+// Mini gráfico de línea en SVG puro (sin librerías) para la evolución de
+// venta de un SKU a lo largo de la serie de semanas.
+function sparklineSvg(valores) {
+  const w = 100, h = 28, pad = 2;
+  const max = Math.max(1, ...valores);
+  const stepX = valores.length > 1 ? (w - pad * 2) / (valores.length - 1) : 0;
+  const pts = valores.map((v, i) => {
+    const x = pad + i * stepX;
+    const y = h - pad - (v / max) * (h - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return `<svg viewBox="0 0 ${w} ${h}" class="sparkline" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2"/></svg>`;
+}
+
+// Gráfico de barras agrupadas (una tienda = un color) con la venta total
+// por tienda en cada semana de la serie, en SVG puro.
+function tendenciasChartTiendasSvg(datosPorSemana) {
+  if (!datosPorSemana.length) return '<p class="muted">Todavía no hay datos importados.</p>';
+  const w = 720, h = 220, padL = 30, padB = 40, padT = 10, padR = 10;
+  const maxVal = Math.max(1, ...datosPorSemana.flatMap(d => STORES.map(s => d.totales[s])));
+  const groupW = (w - padL - padR) / datosPorSemana.length;
+  const barW = groupW / (STORES.length + 1);
+  let bars = '';
+  let labels = '';
+  datosPorSemana.forEach((d, gi) => {
+    const groupX = padL + gi * groupW;
+    STORES.forEach((s, si) => {
+      const val = d.totales[s];
+      const barH = (val / maxVal) * (h - padT - padB);
+      const x = groupX + si * barW;
+      const y = h - padB - barH;
+      bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(barW - 2).toFixed(1)}" height="${barH.toFixed(1)}" fill="${STORE_TREND_COLOR[s]}"><title>${STORE_LABELS[s]} ${d.label}: ${val}</title></rect>`;
+    });
+    labels += `<text x="${(groupX + groupW / 2).toFixed(1)}" y="${h - padB + 16}" text-anchor="middle" font-size="10" fill="var(--muted)">${d.label}</text>`;
+  });
+  const legend = STORES.map((s, i) => `<g transform="translate(${padL + i * 90},${padT})"><rect width="10" height="10" fill="${STORE_TREND_COLOR[s]}"/><text x="14" y="9" font-size="10" fill="var(--muted)">${STORE_LABELS[s]}</text></g>`).join('');
+  return `<svg viewBox="0 0 ${w} ${h}" class="trend-chart">${bars}${labels}${legend}</svg>`;
+}
+
+function renderTendencias() {
+  const serie = tendenciasSerieSemanas();
+  const chartEl = document.getElementById('tendenciasChartTiendas');
+  if (chartEl) chartEl.innerHTML = tendenciasChartTiendasSvg(tendenciasTotalesPorTienda(serie));
+
+  const tbody = document.querySelector('#tableTendenciasTop tbody');
+  const subidasEl = document.getElementById('tendenciasSubidas');
+  const caidasEl = document.getElementById('tendenciasCaidas');
+  if (!tbody || !subidasEl || !caidasEl) return;
+
+  if (serie.length < 1 || !serie.some(w => w.rows.length)) {
+    tbody.innerHTML = '<tr><td colspan="5" class="muted">Todavía no hay datos importados.</td></tr>';
+    subidasEl.innerHTML = caidasEl.innerHTML = '<p class="muted">—</p>';
+    return;
+  }
+
+  const skus = tendenciasSerieSkus(serie);
+  const ultima = serie.length - 1;
+  const penultima = serie.length - 2;
+
+  const top20 = [...skus].sort((a, b) => b.valores[ultima] - a.valores[ultima]).slice(0, 20);
+  tbody.innerHTML = top20.map(r => {
+    const antes = penultima >= 0 ? r.valores[penultima] : 0;
+    const ahora = r.valores[ultima];
+    return `<tr><td>${r.nombre}</td><td>${r.sku}</td><td>${ahora}</td><td>${penultima >= 0 ? tendenciasBadgeHtml(antes, ahora) : '<span class="muted">—</span>'}</td><td>${sparklineSvg(r.valores)}</td></tr>`;
+  }).join('');
+
+  if (penultima >= 0) {
+    const conCambio = skus
+      .filter(r => r.valores[penultima] > 0 || r.valores[ultima] > 0)
+      .map(r => ({ ...r, delta: r.valores[ultima] - r.valores[penultima] }));
+    const subidas = [...conCambio].sort((a, b) => b.delta - a.delta).filter(r => r.delta > 0).slice(0, 5);
+    const caidas = [...conCambio].sort((a, b) => a.delta - b.delta).filter(r => r.delta < 0).slice(0, 5);
+    const listaHtml = (items) => items.length
+      ? `<ul class="trend-list">${items.map(r => `<li>${r.nombre} (${r.sku}): ${r.valores[penultima]} → ${r.valores[ultima]}</li>`).join('')}</ul>`
+      : '<p class="muted">Sin cambios relevantes.</p>';
+    subidasEl.innerHTML = listaHtml(subidas);
+    caidasEl.innerHTML = listaHtml(caidas);
+  } else {
+    subidasEl.innerHTML = caidasEl.innerHTML = '<p class="muted">Hace falta al menos 2 semanas de datos para ver subidas/caídas.</p>';
+  }
+}
+
 // Calcula los traspasos de un SKU según necesidad real, no proporción de
 // ventas: cada tienda destino tiene un margen objetivo (ventas + colchón) y
 // se cubre encadenando orígenes con Amigó primero, respetando el margen que
@@ -2709,6 +2847,7 @@ function renderAll() {
   computeTop20();
   renderRepoTable();
   renderRepoHistoryList();
+  renderTendencias();
   loadConfigForm();
   saveState();
 }

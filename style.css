@@ -107,6 +107,15 @@ label input,label select{color:var(--text);}
 }
 .history-row:last-child{border-bottom:none;}
 
+/* Pestaña Tendencias: gráfico de barras por tienda, sparklines por SKU en
+   la tabla top20, y listas de mayor subida/caída en dos columnas. */
+.trend-chart{width:100%;height:auto;max-width:720px;}
+.sparkline{width:100px;height:28px;display:block;}
+.trend-cols{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+.trend-list{margin:6px 0 0;padding-left:18px;font-size:12.5px;}
+.trend-list li{margin-bottom:4px;}
+@media (max-width:640px){ .trend-cols{grid-template-columns:1fr;} }
+
 .table-scroll{overflow-x:auto;}
 table{width:100%;border-collapse:collapse;font-size:12.5px;}
 th,td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap;}
