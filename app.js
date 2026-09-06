@@ -2269,14 +2269,29 @@ function renderRepoStoreChips() {
 // al redimensionar la ventana y cada vez que se vuelve a pintar la tabla
 // (el contenido de encima puede cambiar de alto, p. ej. al mostrar el aviso
 // de filtros activos).
+//
+// getBoundingClientRect() obliga al navegador a resolver de golpe el layout
+// pendiente de TODA la página — con miles de filas y varias columnas fijadas
+// (position:sticky) por fila, ese cálculo por sí solo puede tardar varios
+// segundos. Como el resultado no depende del contenido de la propia tabla
+// (solo de lo que hay encima), se aplaza a una tarea aparte (y se
+// desduplican llamadas seguidas) para no bloquear el resto del renderizado
+// — la tabla se ve actualizada al momento, y el alto del recuadro de scroll
+// se ajusta enseguida después.
+let repoAdjustScrollScheduled = false;
 function adjustRepoTableScrollHeight() {
-  const panel = document.getElementById('tab-traspasos');
-  if (!panel || !panel.classList.contains('active')) return;
-  const box = panel.querySelector('.table-scroll');
-  if (!box) return;
-  const top = box.getBoundingClientRect().top;
-  const available = window.innerHeight - top - 16;
-  box.style.maxHeight = Math.max(240, Math.round(available)) + 'px';
+  if (repoAdjustScrollScheduled) return;
+  repoAdjustScrollScheduled = true;
+  setTimeout(() => {
+    repoAdjustScrollScheduled = false;
+    const panel = document.getElementById('tab-traspasos');
+    if (!panel || !panel.classList.contains('active')) return;
+    const box = panel.querySelector('.table-scroll');
+    if (!box) return;
+    const top = box.getBoundingClientRect().top;
+    const available = window.innerHeight - top - 16;
+    box.style.maxHeight = Math.max(240, Math.round(available)) + 'px';
+  }, 0);
 }
 window.addEventListener('resize', adjustRepoTableScrollHeight);
 
@@ -2295,6 +2310,101 @@ function renderRepoTable() {
   } finally {
     repoTableRenderBusy = false;
   }
+}
+
+// ¿Sigue esta fila cumpliendo los filtros activos de la tabla de traspasos?
+// La usan tanto el render completo (importar, calcular, cambiar de
+// filtro/orden) como patchRepoRow (una sola fila, tras editar una cantidad,
+// marcar "revisado" o restaurar) para decidir si esa fila debe seguir
+// visible tras el cambio.
+function repoRowVisible(row) {
+  const filterVal = (document.getElementById('repoFilter').value || '').toLowerCase();
+  if (filterVal && !row.sku.toLowerCase().includes(filterVal) && !(row.nombre || '').toLowerCase().includes(filterVal)) return false;
+  if (state.repoSemanal.onlyWithMovement && !(row.movimientos || []).some(m => m.qty > 0)) return false;
+  if (state.repoSemanal.hideRevisadas && row.revisado) return false;
+  if (state.repoSemanal.onlyDebateFuerte && !(!row.revisado && repoActiveMovCount(row) >= 3)) return false;
+  const activeFilters = state.repoSemanal.colFilters || [];
+  if (activeFilters.length && !activeFilters.some(key => {
+    const [f, t] = key.split('>');
+    return movQtyForPair(row, f, t) > 0;
+  })) return false;
+  return true;
+}
+
+// Construye el HTML de un <tr> completo de la tabla de traspasos (como
+// texto, no como nodo — insertar miles de filas de una vez vía innerHTML es
+// bastante más rápido que crear cada <tr> con createElement uno a uno).
+// La usan tanto el render completo como buildRepoRowTr (una sola fila).
+function buildRepoRowHtml(row, pinnedStore) {
+  const pinnedTd = pinnedStore
+    ? `<td class="pinned-col-1">${row.stock[pinnedStore] || 0}</td><td class="pinned-col-2 store-group-end">${row.sales[pinnedStore] || 0}</td>`
+    : '';
+  const top20Td = STORES.map(s => `<td class="top20-col ${row.top20 && row.top20[s] ? 'top20-yes' : 'top20-no'}">${row.top20 && row.top20[s] ? 'SI' : 'NO'}</td>`).join('');
+  const stockSalesTd = STORES.filter(s => s !== pinnedStore).map(s => `<td>${row.stock[s] || 0}</td><td class="store-group-end">${row.sales[s] || 0}</td>`).join('');
+  // Si un mismo SKU tiene más de un traspaso a la vez (p. ej. recibe de una
+  // tienda y envía a otra), se resaltan sus cantidades para que no pasen
+  // desapercibidas al revisar la fila. Si además una cantidad supera el
+  // stock disponible en la tienda de origen, se marca como aviso (tiene
+  // prioridad visual sobre el resaltado de "múltiples traspasos").
+  const activeMovCount = repoActiveMovCount(row);
+  const movTd = MOVEMENT_ORDER.map(([f, t]) => {
+    const qty = movQtyForPair(row, f, t);
+    const exceedsStock = qty > 0 && qty > (row.stock[f] || 0);
+    let cls = '';
+    let title = '';
+    if (exceedsStock) {
+      cls = ' qty-exceeds-stock';
+      title = ` title="${STORE_LABELS[f]} solo tiene ${row.stock[f] || 0} en stock: revisa esta cantidad"`;
+    } else if (qty > 0 && activeMovCount > 1) {
+      cls = ' multi-mov';
+    }
+    return `<td><input type="number" min="0" value="${qty}" class="movPairInput${cls}" data-sku="${row.sku}" data-from="${f}" data-to="${t}"${title}></td>`;
+  }).join('');
+  // 3 o más traspasos simultáneos en la misma referencia son el reparto
+  // más complejo de revisar a ojo (varios orígenes y/o destinos a la
+  // vez) — se resalta el nombre para empezar la revisión por ahí.
+  const nombreCls = activeMovCount >= 3 ? ' class="repo-strong-debate"' : '';
+  const editada = repoRowEditada(row);
+  const restaurarTd = `<td class="restaurar-col"><button type="button" class="btn-small restaurarBtn" data-sku="${row.sku}"${editada ? '' : ' disabled'} title="${editada ? 'Restaurar la sugerencia original del algoritmo (deshace todas las ediciones manuales de esta fila)' : 'Sin cambios manuales que restaurar'}">↺</button></td>`;
+  const revisadoTd = `<td class="revisado-col"><input type="checkbox" class="revisadoCheckbox" data-sku="${row.sku}"${row.revisado ? ' checked' : ''} title="Marcar esta referencia como revisada"></td>`;
+  const trCls = row.revisado ? ' class="row-revisada"' : '';
+  return `<tr${trCls}><td${nombreCls}>${row.nombre}</td><td>${row.sku}</td>${pinnedTd}${top20Td}${stockSalesTd}${movTd}${restaurarTd}${revisadoTd}</tr>`;
+}
+
+// Construye el <tr> (nodo real) de una sola fila — lo usa patchRepoRow para
+// sustituir una fila concreta tras editarla, sin tocar el resto de la tabla.
+function buildRepoRowTr(row, pinnedStore) {
+  const tmp = document.createElement('tbody');
+  tmp.innerHTML = buildRepoRowHtml(row, pinnedStore);
+  return tmp.firstElementChild;
+}
+
+// Pinned store del último render completo — patchRepoRow lo necesita para
+// reconstruir una fila igual que el resto (no cambia salvo en un render
+// completo, así que no hace falta recalcularlo en cada edición).
+let repoLastRenderPinnedStore = null;
+
+// Actualiza en el DOM solo la fila de `row` tras editar una cantidad, marcar
+// "revisado" o restaurar — sin reconstruir el resto de la tabla. Con miles
+// de referencias, repintar las 1500+ filas en cada pulsación de tecla o
+// clic era el motivo real de que la revisión se notara "atascada": editar
+// una sola celda llegaba a tardar varios segundos. Si la fila deja de
+// cumplir los filtros activos tras el cambio (p. ej. "Ocultar revisadas"
+  // con esa referencia recién marcada), se retira de la tabla en vez de
+  // reconstruirla.
+function patchRepoRow(row, tr) {
+  if (repoTableRenderBusy) return; // evita reentrancia si el <tr> se sustituye desde dentro de su propio evento
+  repoTableRenderBusy = true;
+  try {
+    if (!repoRowVisible(row)) {
+      tr.remove();
+    } else {
+      tr.replaceWith(buildRepoRowTr(row, repoLastRenderPinnedStore));
+    }
+  } finally {
+    repoTableRenderBusy = false;
+  }
+  renderRepoSummary();
 }
 
 function renderRepoTableInner() {
@@ -2316,27 +2426,7 @@ function renderRepoTableInner() {
   applyRepoTableZoom();
 
   const tbody = document.querySelector('#tableRepo tbody');
-  tbody.innerHTML = '';
-  const filterVal = (document.getElementById('repoFilter').value || '').toLowerCase();
-  const activeFilters = state.repoSemanal.colFilters || [];
-  let rows = state.repoSemanal.rows.filter(r =>
-    !filterVal || r.sku.toLowerCase().includes(filterVal) || (r.nombre || '').toLowerCase().includes(filterVal)
-  );
-  if (state.repoSemanal.onlyWithMovement) {
-    rows = rows.filter(r => (r.movimientos || []).some(m => m.qty > 0));
-  }
-  if (state.repoSemanal.hideRevisadas) {
-    rows = rows.filter(r => !r.revisado);
-  }
-  if (state.repoSemanal.onlyDebateFuerte) {
-    rows = rows.filter(r => !r.revisado && repoActiveMovCount(r) >= 3);
-  }
-  if (activeFilters.length) {
-    rows = rows.filter(r => activeFilters.some(key => {
-      const [f, t] = key.split('>');
-      return movQtyForPair(r, f, t) > 0;
-    }));
-  }
+  let rows = state.repoSemanal.rows.filter(repoRowVisible);
 
   const sortBy = state.repoSemanal.sortBy;
   const sortedRows = sortBy && sortBy.key
@@ -2350,72 +2440,14 @@ function renderRepoTableInner() {
       })
     : sortByNombre(rows, r => r.nombre).map(({ item }) => item);
 
-  sortedRows.forEach((row) => {
-    const tr = document.createElement('tr');
-    const pinnedTd = pinnedStore
-      ? `<td class="pinned-col-1">${row.stock[pinnedStore] || 0}</td><td class="pinned-col-2 store-group-end">${row.sales[pinnedStore] || 0}</td>`
-      : '';
-    const top20Td = STORES.map(s => `<td class="top20-col ${row.top20 && row.top20[s] ? 'top20-yes' : 'top20-no'}">${row.top20 && row.top20[s] ? 'SI' : 'NO'}</td>`).join('');
-    const stockSalesTd = STORES.filter(s => s !== pinnedStore).map(s => `<td>${row.stock[s] || 0}</td><td class="store-group-end">${row.sales[s] || 0}</td>`).join('');
-    // Si un mismo SKU tiene más de un traspaso a la vez (p. ej. recibe de una
-    // tienda y envía a otra), se resaltan sus cantidades para que no pasen
-    // desapercibidas al revisar la fila. Si además una cantidad supera el
-    // stock disponible en la tienda de origen, se marca como aviso (tiene
-    // prioridad visual sobre el resaltado de "múltiples traspasos").
-    const activeMovCount = repoActiveMovCount(row);
-    const movTd = MOVEMENT_ORDER.map(([f, t]) => {
-      const qty = movQtyForPair(row, f, t);
-      const exceedsStock = qty > 0 && qty > (row.stock[f] || 0);
-      let cls = '';
-      let title = '';
-      if (exceedsStock) {
-        cls = ' qty-exceeds-stock';
-        title = ` title="${STORE_LABELS[f]} solo tiene ${row.stock[f] || 0} en stock: revisa esta cantidad"`;
-      } else if (qty > 0 && activeMovCount > 1) {
-        cls = ' multi-mov';
-      }
-      return `<td><input type="number" min="0" value="${qty}" class="movPairInput${cls}" data-sku="${row.sku}" data-from="${f}" data-to="${t}"${title}></td>`;
-    }).join('');
-    // 3 o más traspasos simultáneos en la misma referencia son el reparto
-    // más complejo de revisar a ojo (varios orígenes y/o destinos a la
-    // vez) — se resalta el nombre para empezar la revisión por ahí.
-    const nombreCls = activeMovCount >= 3 ? ' class="repo-strong-debate"' : '';
-    const editada = repoRowEditada(row);
-    const restaurarTd = `<td class="restaurar-col"><button type="button" class="btn-small restaurarBtn" data-sku="${row.sku}"${editada ? '' : ' disabled'} title="${editada ? 'Restaurar la sugerencia original del algoritmo (deshace todas las ediciones manuales de esta fila)' : 'Sin cambios manuales que restaurar'}">↺</button></td>`;
-    const revisadoTd = `<td class="revisado-col"><input type="checkbox" class="revisadoCheckbox" data-sku="${row.sku}"${row.revisado ? ' checked' : ''} title="Marcar esta referencia como revisada"></td>`;
-    if (row.revisado) tr.classList.add('row-revisada');
-    tr.innerHTML = `<td${nombreCls}>${row.nombre}</td><td>${row.sku}</td>${pinnedTd}${top20Td}${stockSalesTd}${movTd}${restaurarTd}${revisadoTd}`;
-    tbody.appendChild(tr);
-  });
+  // Se guarda para que patchRepoRow (edición de una sola fila, sin re-render
+  // completo — ver más abajo) sepa reconstruir una fila exactamente igual
+  // que aquí, y para saber si sigue cumpliendo los filtros activos.
+  repoLastRenderPinnedStore = pinnedStore;
 
-  tbody.querySelectorAll('.movPairInput').forEach(inp => {
-    inp.addEventListener('change', (e) => {
-      const row = state.repoSemanal.rows.find(r => r.sku === e.target.dataset.sku);
-      const v = Math.max(0, parseInt(e.target.value, 10) || 0);
-      setMovQtyForPair(row, e.target.dataset.from, e.target.dataset.to, v);
-      saveState();
-      renderRepoTable();
-    });
-  });
-
-  tbody.querySelectorAll('.revisadoCheckbox').forEach(chk => {
-    chk.addEventListener('change', (e) => {
-      const row = state.repoSemanal.rows.find(r => r.sku === e.target.dataset.sku);
-      row.revisado = e.target.checked;
-      saveState();
-      renderRepoTable();
-    });
-  });
-
-  tbody.querySelectorAll('.restaurarBtn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const row = state.repoSemanal.rows.find(r => r.sku === e.target.dataset.sku);
-      row.movimientos = JSON.parse(JSON.stringify(row.movimientosOriginal));
-      saveState();
-      renderRepoTable();
-      toast(`${row.sku}: restaurada la sugerencia original.`);
-    });
-  });
+  // Una sola escritura al DOM para todas las filas (mucho más rápido que
+  // crear y añadir cada <tr> por separado, sobre todo con miles de filas).
+  tbody.innerHTML = sortedRows.map(row => buildRepoRowHtml(row, pinnedStore)).join('');
 
   document.querySelectorAll('#tableRepo thead .colFilterBtn').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -2467,6 +2499,16 @@ function renderRepoFilterInfo() {
 // renders (solo se vacía y se rellena), así que basta con un único listener
 // delegado aquí, no hace falta reengancharlo en cada renderRepoTableInner.
 document.querySelector('#tableRepo tbody').addEventListener('click', (e) => {
+  const restaurarBtn = e.target.closest('.restaurarBtn');
+  if (restaurarBtn) {
+    if (restaurarBtn.disabled) return;
+    const row = state.repoSemanal.rows.find(r => r.sku === restaurarBtn.dataset.sku);
+    row.movimientos = JSON.parse(JSON.stringify(row.movimientosOriginal));
+    saveState();
+    patchRepoRow(row, restaurarBtn.closest('tr'));
+    toast(`${row.sku}: restaurada la sugerencia original.`);
+    return;
+  }
   const cell = e.target.closest('td');
   if (!cell) return;
   const table = document.getElementById('tableRepo');
@@ -2480,7 +2522,34 @@ document.querySelector('#tableRepo tbody').addEventListener('click', (e) => {
   });
 });
 
-document.getElementById('repoFilter').addEventListener('input', renderRepoTable);
+// Editar una cantidad de traspaso o marcar/desmarcar "revisado" solo
+// actualiza esa fila (ver patchRepoRow) en vez de repintar toda la tabla —
+// con miles de referencias, hacerlo en cada edición era lo que se notaba
+// como "atascado". Un único listener delegado aquí, igual que el de clic de
+// arriba: el <tbody> no se recrea entre renders.
+document.querySelector('#tableRepo tbody').addEventListener('change', (e) => {
+  if (e.target.classList.contains('movPairInput')) {
+    const row = state.repoSemanal.rows.find(r => r.sku === e.target.dataset.sku);
+    const v = Math.max(0, parseInt(e.target.value, 10) || 0);
+    setMovQtyForPair(row, e.target.dataset.from, e.target.dataset.to, v);
+    saveState();
+    patchRepoRow(row, e.target.closest('tr'));
+  } else if (e.target.classList.contains('revisadoCheckbox')) {
+    const row = state.repoSemanal.rows.find(r => r.sku === e.target.dataset.sku);
+    row.revisado = e.target.checked;
+    saveState();
+    patchRepoRow(row, e.target.closest('tr'));
+  }
+});
+
+// Filtro de texto (SKU/nombre): con miles de referencias, recalcular la
+// tabla entera en cada pulsación de tecla se notaba a trompicones. Se
+// espera una breve pausa de escritura (180ms) antes de re-renderizar.
+let repoFilterDebounceTimer = null;
+document.getElementById('repoFilter').addEventListener('input', () => {
+  clearTimeout(repoFilterDebounceTimer);
+  repoFilterDebounceTimer = setTimeout(renderRepoTable, 180);
+});
 document.getElementById('repoOnlyWithMov').addEventListener('change', (e) => {
   state.repoSemanal.onlyWithMovement = e.target.checked;
   saveState();
